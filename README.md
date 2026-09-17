@@ -33,7 +33,7 @@ npm start
 本地 D1 首次使用时执行：
 
 ```bash
-node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_pulse_initial.sql
+npm run db:local:seed
 ```
 
 开发预览也可以用 `npm run dev`；完整 API 验证建议使用 `npm start`，因为它会通过 Wrangler 启动带 D1 的 Worker。
@@ -168,6 +168,8 @@ npm run test:d1
 ```
 
 它会真实调用 API，覆盖 D1 Cookie 会话、分步持久化、preview/full、重复支付、完成态写保护和 reset。并发更新由 `npm test` 中的 `Promise.all` 场景覆盖；暂未覆盖真实第三方支付签名、支付 provider 事件审计和生产 D1 网络故障，因为本题要求的是可重放的模拟回调；生产化时应为 `/api/pay` 增加 provider 签名校验和支付事件表。
+
+GitHub Actions 在类型检查、lint、单元/Route 测试和生产构建后，还会初始化本地 D1、启动 Worker 并执行同一套 HTTP smoke，避免 CI 只验证内存实现。
 
 ## AI 使用复盘
 

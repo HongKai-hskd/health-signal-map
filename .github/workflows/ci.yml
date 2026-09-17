@@ -33,3 +33,21 @@ jobs:
 
       - name: Production build
         run: npm run build
+
+      - name: Initialize local D1
+        run: npm run db:local:seed
+
+      - name: Start local Worker
+        run: |
+          npm start > /tmp/pulse-worker.log 2>&1 &
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8787/ > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/pulse-worker.log
+          exit 1
+
+      - name: D1 HTTP smoke test
+        run: npm run test:d1

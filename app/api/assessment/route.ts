@@ -25,14 +25,18 @@ export async function PATCH(request: Request) {
   try {
     const sessionId = readSessionId(request);
     if (!sessionId) return Response.json({ error: "需要有效的测评会话。" }, { status: 401 });
-    const payload = (await readJson(request)) as {
+    const payload = await readJson(request);
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return Response.json({ error: "step 和 data 都是必填项。" }, { status: 400 });
+    }
+    const input = payload as {
       step?: string;
       data?: Record<string, unknown>;
     };
-    if (!payload.step || !payload.data || typeof payload.data !== "object") {
+    if (!input.step || !input.data || typeof input.data !== "object") {
       return Response.json({ error: "step 和 data 都是必填项。" }, { status: 400 });
     }
-    const session = await assessmentService().saveStep(sessionId, payload.step, payload.data);
+    const session = await assessmentService().saveStep(sessionId, input.step, input.data);
     return Response.json({ session }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return jsonError(error);

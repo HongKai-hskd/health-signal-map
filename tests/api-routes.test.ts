@@ -116,6 +116,9 @@ describe("assessment API routes", () => {
     expect(malformed.status).toBe(400);
     expect((await readJson<{ error: string }>(malformed)).error).toContain("JSON");
 
+    const nullPayload = await assessmentPatch(request("/api/assessment", { method: "PATCH", cookie, body: "null" }));
+    expect(nullPayload.status).toBe(400);
+
     const unknownStep = await saveStep(cookie, "unknown", {});
     expect(unknownStep.status).toBe(400);
 
