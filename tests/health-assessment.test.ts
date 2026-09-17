@@ -114,6 +114,7 @@ describe("assessment persistence and access", () => {
     const preview = await service.getResults(session.id);
     expect(preview.access).toBe("preview");
     expect(preview.protected?.locked).toBe(true);
+    expect(preview.protected?.totalWeeks).toBe(18);
     expect(preview.protected?.message).toContain("18 周");
     expect(preview).not.toHaveProperty("details");
     expect(JSON.stringify(preview)).not.toContain("curve");

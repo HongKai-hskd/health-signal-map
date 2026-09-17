@@ -105,6 +105,7 @@ export type PublicHealthResult = {
   >;
   protected?: {
     locked: true;
+    totalWeeks: number;
     message: string;
   };
   details?: {
@@ -258,6 +259,7 @@ export function redactHealthAssessment(
       summary,
       protected: {
         locked: true,
+        totalWeeks,
         message: `解锁完整的 ${totalWeeks} 周路径、每周检查点和趋势变化。`,
       },
     };

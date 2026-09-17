@@ -150,10 +150,11 @@ describe("assessment API routes", () => {
 
     const completed = await complete(request("/api/assessment/complete", { method: "POST", cookie, body: {} }));
     expect(completed.status).toBe(200);
-    const preview = await readJson<{ result: { access: string; details?: unknown; protected?: { locked: boolean } } }>(completed);
+    const preview = await readJson<{ result: { access: string; details?: unknown; protected?: { locked: boolean; totalWeeks: number } } }>(completed);
     expect(preview.result.access).toBe("preview");
     expect(preview.result.details).toBeUndefined();
     expect(preview.result.protected?.locked).toBe(true);
+    expect(preview.result.protected?.totalWeeks).toBe(18);
 
     const previewExport = await exportResults(request("/api/results/export", { cookie }));
     expect(previewExport.status).toBe(200);

@@ -48,7 +48,7 @@ node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1
 | POST | `/api/assessment/reset` | 创建全新的测评 session，旧结果保留但不再复用 |
 | PATCH | `/api/assessment` | 保存一个步骤，支持乱序和重复提交 |
 | POST | `/api/assessment/complete` | 服务端校验完整数据并生成结果 |
-| GET | `/api/results` | 会员返回完整数据，非会员不返回 `details/curve` |
+| GET | `/api/results` | 会员返回完整数据，非会员只返回 summary 和 `protected.totalWeeks/message`，不返回 `details/curve` |
 | GET | `/api/results/export` | 下载当前会话可见范围内的 JSON 报告 |
 | POST | `/api/pay` | 校验 `plan=pulse_weekly`，模拟幂等支付回调并将订阅状态改为 active |
 
