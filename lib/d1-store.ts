@@ -9,6 +9,8 @@ import {
 } from "../db/schema";
 import {
   createActionPlan,
+  createAdjustmentGuide,
+  createPhasePlan,
   mergeAssessmentData,
   type AssessmentData,
   type HealthAssessment,
@@ -172,6 +174,8 @@ export class D1AssessmentStore implements AssessmentStore {
       insight: row.insight,
       curve,
       actionPlan: createActionPlan(input, curve.at(-1)?.week ?? 6),
+      phasePlan: createPhasePlan(input, curve.at(-1)?.week ?? 6),
+      adjustmentGuide: createAdjustmentGuide(),
       input,
     };
   }

@@ -191,6 +191,22 @@ button { cursor: pointer; }
 .action-plan-card h3 { margin: 22px 0 0; font-size: 17px; letter-spacing: -.04em; }
 .action-plan-card p, .extras-copy { margin: 9px 0 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
 .extras-copy { max-width: 620px; }
+.report-section-kicker { margin: 28px 0 0; color: var(--mint); font-size: 11px; font-weight: 700; letter-spacing: .13em; }
+.phase-plan-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 12px; }
+.phase-plan-card, .adjustment-card { padding: 18px; border: 1px solid rgba(147, 247, 203, .13); border-radius: 13px; background: rgba(14, 21, 23, .38); }
+.phase-plan-meta { display: flex; justify-content: space-between; gap: 14px; color: var(--mint); font-size: 10px; font-weight: 700; letter-spacing: .08em; }
+.phase-plan-meta span:last-child { color: var(--muted); }
+.phase-plan-card h3 { margin: 20px 0 0; font-size: 19px; letter-spacing: -.05em; }
+.phase-purpose { margin: 8px 0 0; color: #c6d1cc; font-size: 13px; line-height: 1.5; }
+.phase-plan-card dl { display: grid; gap: 10px; margin: 20px 0 0; }
+.phase-plan-card dl div { display: grid; grid-template-columns: 55px 1fr; gap: 10px; }
+.phase-plan-card dt { color: var(--coral); font-size: 11px; font-weight: 700; }
+.phase-plan-card dd { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.adjustment-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+.adjustment-card h3 { margin: 0; font-size: 15px; letter-spacing: -.03em; }
+.adjustment-card p { display: grid; gap: 4px; margin: 15px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.adjustment-card p + p { margin-top: 10px; }
+.adjustment-card strong { color: var(--ink); font-size: 11px; }
 
 @media (max-width: 860px) {
   .assessment-layout { width: min(680px, 88vw); grid-template-columns: 1fr; gap: 38px; align-items: start; padding-top: 7vh; }
@@ -240,4 +256,5 @@ button { cursor: pointer; }
   .extras-heading { display: grid; }
   .export-report-button { justify-self: start; }
   .action-plan-grid { grid-template-columns: 1fr; }
+  .phase-plan-grid, .adjustment-grid { grid-template-columns: 1fr; }
 }

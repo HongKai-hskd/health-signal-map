@@ -161,7 +161,12 @@ describe("assessment API routes", () => {
 
     const previewExport = await exportResults(request("/api/results/export", { cookie }));
     expect(previewExport.status).toBe(200);
-    expect((await readJson<{ details?: unknown }>(previewExport)).details).toBeUndefined();
+    expect(previewExport.headers.get("content-type")).toContain("text/markdown");
+    const previewMarkdown = await previewExport.text();
+    expect(previewMarkdown).toContain("# pulse/08 健康信号报告");
+    expect(previewMarkdown).toContain("当前可见范围");
+    expect(previewMarkdown).not.toContain("## 四阶段行动路线");
+    expect(previewMarkdown).not.toContain("weightKg");
 
     const completedWrite = await saveStep(cookie, "body", { age: 33, heightCm: 168, weightKg: 75 });
     expect(completedWrite.status).toBe(409);
@@ -171,11 +176,13 @@ describe("assessment API routes", () => {
 
     const paid = await pay(request("/api/pay", { method: "POST", cookie, body: { plan: "pulse_weekly" } }));
     expect(paid.status).toBe(200);
-    const full = await readJson<{ payment: { plan: string }; result: { access: string; details?: { curve: unknown[]; actionPlan: unknown[] } } }>(paid);
+    const full = await readJson<{ payment: { plan: string }; result: { access: string; details?: { curve: unknown[]; actionPlan: unknown[]; phasePlan: unknown[]; adjustmentGuide: unknown[] } } }>(paid);
     expect(full.payment.plan).toBe("pulse_weekly");
     expect(full.result.access).toBe("full");
     expect(full.result.details?.curve.length).toBeGreaterThan(1);
     expect(full.result.details?.actionPlan.length).toBe(3);
+    expect(full.result.details?.phasePlan.length).toBe(4);
+    expect(full.result.details?.adjustmentGuide.length).toBe(3);
 
     const repeatedPay = await pay(request("/api/pay", { method: "POST", cookie, body: { plan: "pulse_weekly" } }));
     expect(repeatedPay.status).toBe(200);
@@ -183,10 +190,11 @@ describe("assessment API routes", () => {
 
     const exported = await exportResults(request("/api/results/export", { cookie }));
     expect(exported.status).toBe(200);
-    expect(exported.headers.get("content-disposition")).toContain("pulse-08-health-report.json");
-    const exportedPayload = await readJson<{ access: string; details?: { actionPlan: unknown[] } }>(exported);
-    expect(exportedPayload.access).toBe("full");
-    expect(exportedPayload.details?.actionPlan.length).toBe(3);
+    expect(exported.headers.get("content-disposition")).toContain("pulse-08-health-report.md");
+    const exportedMarkdown = await exported.text();
+    expect(exportedMarkdown).toContain("## 四阶段行动路线");
+    expect(exportedMarkdown).toContain("## 状态调整规则");
+    expect(exportedMarkdown).toContain("目标体重");
   });
 
   it("creates a new cookie-bound session when resetting", async () => {

@@ -33,6 +33,9 @@ describe("health assessment algorithm", () => {
     expect(result.curve.at(-1)?.weightKg).toBe(68);
     expect(result.actionPlan).toHaveLength(3);
     expect(result.actionPlan[0].title).toContain("最低可行");
+    expect(result.phasePlan).toHaveLength(4);
+    expect(result.phasePlan.at(-1)?.endWeek).toBe(18);
+    expect(result.adjustmentGuide).toHaveLength(3);
   });
 
   it.each([
@@ -135,6 +138,8 @@ describe("assessment persistence and access", () => {
     expect(paid.details?.curve.length).toBeGreaterThan(1);
     expect(paid.details?.targetWeightKg).toBe(68);
     expect(paid.details?.actionPlan).toHaveLength(3);
+    expect(paid.details?.phasePlan).toHaveLength(4);
+    expect(paid.details?.adjustmentGuide).toHaveLength(3);
   });
 
   it("keeps a completed result idempotent and rejects stale writes", async () => {

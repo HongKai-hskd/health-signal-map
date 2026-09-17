@@ -81,6 +81,23 @@ export type ActionPlanItem = {
   focus: string;
 };
 
+export type ReportPhase = {
+  phase: number;
+  startWeek: number;
+  endWeek: number;
+  title: string;
+  purpose: string;
+  movement: string;
+  nutrition: string;
+  checkIn: string;
+};
+
+export type AdjustmentGuide = {
+  signal: string;
+  response: string;
+  guardrail: string;
+};
+
 export type HealthAssessment = {
   bmi: number;
   bmiCategory: "low" | "balanced" | "high";
@@ -89,6 +106,8 @@ export type HealthAssessment = {
   score: number;
   curve: CurvePoint[];
   actionPlan: ActionPlanItem[];
+  phasePlan: ReportPhase[];
+  adjustmentGuide: AdjustmentGuide[];
   insight: string;
   input: HealthInput;
 };
@@ -113,6 +132,8 @@ export type PublicHealthResult = {
     curve: CurvePoint[];
     checkpoints: Array<{ week: number; label: string; weightKg: number }>;
     actionPlan: ActionPlanItem[];
+    phasePlan: ReportPhase[];
+    adjustmentGuide: AdjustmentGuide[];
   };
 };
 
@@ -199,6 +220,87 @@ export function createActionPlan(input: HealthInput, weeks: number): ActionPlanI
   );
 }
 
+export function createPhasePlan(input: HealthInput, weeks: number): ReportPhase[] {
+  const phaseEnds = [...new Set([
+    Math.max(1, Math.round(weeks * 0.22)),
+    Math.max(2, Math.round(weeks * 0.5)),
+    Math.max(3, Math.round(weeks * 0.78)),
+    weeks,
+  ])].sort((left, right) => left - right);
+  const movementAnchor =
+    input.activityLevel === "new"
+      ? "每周 2 次 10–20 分钟轻量活动"
+      : `围绕每周 ${input.exerciseDays} 天活动安排`;
+  const nutritionAnchor =
+    input.goal === "feel_lighter"
+      ? "每餐先安排一份蛋白质和至少一种蔬菜"
+      : input.goal === "get_stronger"
+        ? "活动日优先保证一顿完整、规律的餐食"
+        : "固定一份最容易重复的早餐或加餐组合";
+  const phaseCopy = [
+    {
+      title: "建立基线",
+      purpose: "先让计划进入生活，不追求一次做得很满。",
+      movement: `${movementAnchor}，把完成作为唯一标准。`,
+      nutrition: `${nutritionAnchor}，先从最容易重复的一餐开始。`,
+      checkIn: "记录睡眠、精力和完成度，周末只调整一个变量。",
+    },
+    {
+      title: "叠加节奏",
+      purpose: "在已经能重复的动作上增加一点点结构。",
+      movement: "从已有动作里选一个，增加 5 分钟或一组，不同时增加两项。",
+      nutrition: "提前准备一个简单选项，减少忙碌时临时做决定的次数。",
+      checkIn: "如果完成度低于一半，先缩小动作，不用补偿性加码。",
+    },
+    {
+      title: "保留弹性",
+      purpose: "给忙碌和波动留出空间，让计划不会因一次偏离而中断。",
+      movement: "保留一次低强度恢复，活动和休息都算计划的一部分。",
+      nutrition: "允许一到两次弹性选择，回到下一顿的正常节奏即可。",
+      checkIn: "看连续两周的趋势，不用用单日体感给自己下结论。",
+    },
+    {
+      title: "巩固与复盘",
+      purpose: "挑出真正值得长期保留的习惯，为下一轮校准做准备。",
+      movement: "挑出最值得长期保留的两项动作，准备下一轮复盘。",
+      nutrition: "保留最省力的饮食结构，把复杂规则删到最低。",
+      checkIn: "复盘完成度、精力和生活安排，再决定下一段节奏。",
+    },
+  ];
+  let startWeek = 1;
+  return phaseEnds.map((endWeek, index) => {
+    const copy = phaseCopy[Math.min(index, phaseCopy.length - 1)];
+    const phase = {
+      phase: index + 1,
+      startWeek,
+      endWeek,
+      ...copy,
+    };
+    startWeek = endWeek + 1;
+    return phase;
+  });
+}
+
+export function createAdjustmentGuide(): AdjustmentGuide[] {
+  return [
+    {
+      signal: "本周完成度低于一半",
+      response: "把下周最重要的动作缩小到原来的一半，先恢复出现的频率。",
+      guardrail: "不要用临时加量补偿，稳定比补课更重要。",
+    },
+    {
+      signal: "连续两周都觉得吃力",
+      response: "保持当前阶段，不再增加新目标，只保留最容易完成的一项。",
+      guardrail: "先观察睡眠、精力和生活安排，再决定是否推进。",
+    },
+    {
+      signal: "出现持续不适或异常反馈",
+      response: "暂停当前计划，优先寻求合格专业人士的建议。",
+      guardrail: "这份报告是健康教育估算，不替代医疗判断。",
+    },
+  ];
+}
+
 export function calculateHealthAssessment(input: HealthInput, asOf = new Date()): HealthAssessment {
   const parsed = healthInputSchema.parse(input);
   const heightM = parsed.heightCm / 100;
@@ -227,6 +329,8 @@ export function calculateHealthAssessment(input: HealthInput, asOf = new Date())
     score,
     curve,
     actionPlan: createActionPlan(parsed, weeks),
+    phasePlan: createPhasePlan(parsed, weeks),
+    adjustmentGuide: createAdjustmentGuide(),
     insight:
       category === "balanced"
         ? "你的身体基线处在稳定区间，小而持续的进步会真正带来变化。"
@@ -283,8 +387,85 @@ export function redactHealthAssessment(
       curve: assessment.curve,
       checkpoints,
       actionPlan: assessment.actionPlan,
+      phasePlan: assessment.phasePlan,
+      adjustmentGuide: assessment.adjustmentGuide,
     },
   };
+}
+
+export function renderMarkdownReport(result: PublicHealthResult) {
+  const lines = [
+    "# pulse/08 健康信号报告",
+    "",
+    `> 会话：${result.sessionId}`,
+    `> 报告状态：${result.access === "full" ? "完整报告" : "预览报告"}`,
+    "",
+    "## 基线摘要",
+    "",
+    `- BMI：${result.summary.bmi.toFixed(1)}（${result.summary.bmiCategory === "balanced" ? "平衡区间" : result.summary.bmiCategory === "low" ? "能量优先区间" : "循序推进区间"}）`,
+    `- 每日能量目标：${result.summary.calorieTarget.toLocaleString("zh-CN")} 千卡 / 天`,
+    `- 目标窗口：${result.summary.targetDate}`,
+    `- 准备度评分：${result.summary.score} / 100`,
+    `- 洞察：${result.summary.insight}`,
+  ];
+
+  if (result.access !== "full" || !result.details) {
+    lines.push(
+      "",
+      "## 当前可见范围",
+      "",
+      result.protected?.message ?? "完整报告内容尚未解锁。",
+      "",
+      "完整报告将在解锁后包含四阶段行动路线、每周检查点和状态调整规则。",
+    );
+  } else {
+    lines.push(
+      "",
+      "## 目标路径",
+      "",
+      `- 目标体重：${result.details.targetWeightKg} kg`,
+      `- 预计路径：${result.details.phasePlan.at(-1)?.endWeek ?? result.details.curve.at(-1)?.week ?? 6} 周`,
+      "",
+      "## 三条核心动作",
+      "",
+      ...result.details.actionPlan.flatMap((item) => [
+        `### 第 ${item.week} 周 · ${item.title}`,
+        `- 重点：${item.focus}`,
+        `- ${item.description}`,
+        "",
+      ]),
+      "## 四阶段行动路线",
+      "",
+      ...result.details.phasePlan.flatMap((phase) => [
+        `### 阶段 ${phase.phase}｜第 ${phase.startWeek}–${phase.endWeek} 周：${phase.title}`,
+        `- 目的：${phase.purpose}`,
+        `- 活动：${phase.movement}`,
+        `- 饮食结构：${phase.nutrition}`,
+        `- 检查点：${phase.checkIn}`,
+        "",
+      ]),
+      "## 每周检查点",
+      "",
+      ...result.details.checkpoints.map((checkpoint) => `- 第 ${checkpoint.week} 周（${checkpoint.label}）：${checkpoint.weightKg} kg 信号`),
+      "",
+      "## 状态调整规则",
+      "",
+      ...result.details.adjustmentGuide.flatMap((guide) => [
+        `### ${guide.signal}`,
+        `- 怎么做：${guide.response}`,
+        `- 注意：${guide.guardrail}`,
+        "",
+      ]),
+    );
+  }
+
+  lines.push(
+    "## 说明",
+    "",
+    "本报告由 pulse/08 根据本次测评输入生成，仅供健康教育和自我观察参考，不替代医疗建议。",
+    "",
+  );
+  return lines.join("\n");
 }
 
 export function mergeAssessmentData(parts: AssessmentData[]) {

@@ -7,7 +7,7 @@
 参考 BetterMe 的“全屏单步选择 + 顶部进度 + 结果解锁”节奏，但做了三处改造：
 
 - 每一步都有即时“实时计划预览”，用户能理解为什么继续填写。
-- 结果页展示健康信号、可解释洞察和目标窗口，而不是只给一个分数；完整结果还会拆成三个阶段的行动计划。
+- 结果页展示健康信号、可解释洞察和目标窗口，而不是只给一个分数；完整结果还会拆成四阶段行动路线、每周检查点和状态调整规则。
 - 不强制注册或填写邮箱，匿名 HttpOnly session 负责恢复进度；付款是可重放的演示回调。
 
 ## 技术栈
@@ -49,7 +49,7 @@ npm run db:local:seed
 | PATCH | `/api/assessment` | 保存一个步骤，支持乱序和重复提交 |
 | POST | `/api/assessment/complete` | 服务端校验完整数据并生成结果 |
 | GET | `/api/results` | 会员返回完整数据，非会员只返回 summary 和 `protected.totalWeeks/message`，不返回 `details/curve` |
-| GET | `/api/results/export` | 下载当前会话可见范围内的 JSON 报告 |
+| GET | `/api/results/export` | 下载当前会话可见范围内的 Markdown 报告 |
 | POST | `/api/pay` | 校验 `plan=pulse_weekly`，模拟幂等支付回调并将订阅状态改为 active |
 
 接口约束：没有 `pulse_session` Cookie 的写入/结果请求返回 `401`；非法步骤返回 `400`；非法 JSON 返回 `400`；Zod 数据校验失败返回 `422`；已完成 session 不允许继续修改，返回 `409`，需要通过 reset 开始新测评。
@@ -78,7 +78,7 @@ curl -sS -b pulse.cookies -H 'Content-Type: application/json' -X POST \
   -d '{}' "$BASE/api/assessment/complete"
 curl -sS -b pulse.cookies "$BASE/api/results"
 
-# 模拟回调后：subscriptionStatus=active，响应中出现完整 details.curve 和 actionPlan
+# 模拟回调后：subscriptionStatus=active，响应中出现完整 details.curve、actionPlan 和 phasePlan
 curl -sS -b pulse.cookies -H 'Content-Type: application/json' -X POST \
   -d '{"plan":"pulse_weekly"}' "$BASE/api/pay"
 curl -sS -b pulse.cookies "$BASE/api/results"
@@ -138,7 +138,7 @@ erDiagram
 - `assessment_steps` 以 `(session_id, step_key)` 唯一约束保存增量数据，是进度恢复和并发更新的事实来源。
 - `assessment_sessions.current_step` 只做快速展示，使用 `max(current_step, incoming_step)`，不会因乱序提交倒退。
 - `health_results` 保存服务器计算结果、输入快照和趋势 JSON，`subscriptions` 独立记录权限状态。
-- 会员报告额外返回按第 1 周、中段和目标窗口组织的 `actionPlan`；导出接口严格复用当前 session 的脱敏权限，不会绕过 preview/full 限制。
+- 会员报告额外返回按第 1 周、中段和目标窗口组织的 `actionPlan`、四阶段 `phasePlan` 和 `adjustmentGuide`；导出接口严格复用当前 session 的脱敏权限，不会绕过 preview/full 限制。
 - 常用 session 查询和唯一关系都有索引；SQL migration 位于 `drizzle/0000_pulse_initial.sql`。
 
 ## 测试覆盖
@@ -156,7 +156,7 @@ npm test
 - Cookie 会话创建与恢复、无 Cookie 鉴权、非法 JSON、未知步骤、非法数值、数组 data
 - 非会员脱敏，明确断言响应 JSON 不含 `curve`
 - `/pay` plan 校验、重复回调幂等、会员结果从 preview 到 full 的 Route 级闭环
-- 会员行动计划字段与报告导出响应头、权限边界
+- 会员行动计划、四阶段路线、状态调整规则与 Markdown 报告导出权限边界
 - 完成结果幂等、已完成 session 拒绝过期写入、重新测评创建新 session
 
 本地 D1 HTTP smoke 测试需要先启动完整 Worker：
