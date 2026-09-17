@@ -10,6 +10,22 @@
 - 结果页展示健康信号、可解释洞察和目标窗口，而不是只给一个分数；完整结果还会拆成四阶段行动路线、每周检查点和状态调整规则。
 - 不强制注册或填写邮箱，匿名 HttpOnly session 负责恢复进度；付款是可重放的演示回调。
 
+## 需求完成度
+
+除公网部署相关交付物外，挑战要求的本地工程闭环已经完成：
+
+| 要求 | 状态 | 证据 |
+| --- | --- | --- |
+| 分步保存与中断恢复 | 已完成 | Cookie 会话、步骤表事实来源、D1 HTTP smoke |
+| 服务端健康计算 | 已完成 | BMI、能量目标、目标日期、趋势与行动路线 |
+| 订阅鉴权与差异化结果 | 已完成 | preview/full、脱敏导出、`/api/pay` 幂等解锁 |
+| 非法输入与边界测试 | 已完成 | Zod 上下界、未知字段、非法 JSON、支付参数校验 |
+| 并发与状态一致性 | 已完成 | `Promise.all` 并发保存、完成态写保护、结果幂等 |
+| 自动化质量保障 | 已完成 | Vitest、TypeScript、lint、生产构建、D1 smoke、CI |
+| 数据模型与 Schema 图 | 已完成 | `db/schema.ts`、Drizzle migration、Mermaid ER 图 |
+| AI 使用复盘 | 已完成 | 本 README 的 AI 使用复盘章节 |
+| 公网 URL、GitHub 链接、线上 sessionId | 待上线 | 按当前阶段暂不处理 |
+
 ## 技术栈
 
 - Next.js App Router + Vinext + TypeScript

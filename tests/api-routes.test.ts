@@ -174,6 +174,16 @@ describe("assessment API routes", () => {
     const invalidPlan = await pay(request("/api/pay", { method: "POST", cookie, body: { plan: "not-a-plan" } }));
     expect(invalidPlan.status).toBe(422);
 
+    const missingPlan = await pay(request("/api/pay", { method: "POST", cookie, body: {} }));
+    expect(missingPlan.status).toBe(422);
+
+    const unknownPaymentField = await pay(request("/api/pay", {
+      method: "POST",
+      cookie,
+      body: { plan: "pulse_weekly", debug: true },
+    }));
+    expect(unknownPaymentField.status).toBe(422);
+
     const paid = await pay(request("/api/pay", { method: "POST", cookie, body: { plan: "pulse_weekly" } }));
     expect(paid.status).toBe(200);
     const full = await readJson<{ payment: { plan: string }; result: { access: string; details?: { curve: unknown[]; actionPlan: unknown[]; phasePlan: unknown[]; adjustmentGuide: unknown[] } } }>(paid);
@@ -183,6 +193,12 @@ describe("assessment API routes", () => {
     expect(full.result.details?.actionPlan.length).toBe(3);
     expect(full.result.details?.phasePlan.length).toBe(4);
     expect(full.result.details?.adjustmentGuide.length).toBe(3);
+
+    const fullResults = await results(request("/api/results", { cookie }));
+    expect(fullResults.status).toBe(200);
+    const fullResultsPayload = await readJson<{ access: string; details?: { curve: unknown[] } }>(fullResults);
+    expect(fullResultsPayload.access).toBe("full");
+    expect(fullResultsPayload.details?.curve.length).toBeGreaterThan(1);
 
     const repeatedPay = await pay(request("/api/pay", { method: "POST", cookie, body: { plan: "pulse_weekly" } }));
     expect(repeatedPay.status).toBe(200);
