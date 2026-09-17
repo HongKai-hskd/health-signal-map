@@ -46,6 +46,7 @@ let assessmentPatch: RouteHandler;
 let complete: RouteHandler;
 let reset: RouteHandler;
 let results: RouteHandler;
+let exportResults: RouteHandler;
 let pay: RouteHandler;
 
 beforeAll(async () => {
@@ -53,6 +54,7 @@ beforeAll(async () => {
   ({ POST: complete } = await import("../app/api/assessment/complete/route"));
   ({ POST: reset } = await import("../app/api/assessment/reset/route"));
   ({ GET: results } = await import("../app/api/results/route"));
+  ({ GET: exportResults } = await import("../app/api/results/export/route"));
   ({ POST: pay } = await import("../app/api/pay/route"));
 });
 
@@ -106,6 +108,7 @@ describe("assessment API routes", () => {
 
   it("returns Chinese validation errors for missing cookie, malformed JSON and invalid step data", async () => {
     expect((await assessmentPatch(request("/api/assessment", { method: "PATCH", body: {} }))).status).toBe(401);
+    expect((await exportResults(request("/api/results/export"))).status).toBe(401);
 
     const created = await assessmentGet(request("/api/assessment"));
     const cookie = cookieFrom(created);
@@ -152,6 +155,10 @@ describe("assessment API routes", () => {
     expect(preview.result.details).toBeUndefined();
     expect(preview.result.protected?.locked).toBe(true);
 
+    const previewExport = await exportResults(request("/api/results/export", { cookie }));
+    expect(previewExport.status).toBe(200);
+    expect((await readJson<{ details?: unknown }>(previewExport)).details).toBeUndefined();
+
     const completedWrite = await saveStep(cookie, "body", { age: 33, heightCm: 168, weightKg: 75 });
     expect(completedWrite.status).toBe(409);
 
@@ -160,14 +167,22 @@ describe("assessment API routes", () => {
 
     const paid = await pay(request("/api/pay", { method: "POST", cookie, body: { plan: "pulse_weekly" } }));
     expect(paid.status).toBe(200);
-    const full = await readJson<{ payment: { plan: string }; result: { access: string; details?: { curve: unknown[] } } }>(paid);
+    const full = await readJson<{ payment: { plan: string }; result: { access: string; details?: { curve: unknown[]; actionPlan: unknown[] } } }>(paid);
     expect(full.payment.plan).toBe("pulse_weekly");
     expect(full.result.access).toBe("full");
     expect(full.result.details?.curve.length).toBeGreaterThan(1);
+    expect(full.result.details?.actionPlan.length).toBe(3);
 
     const repeatedPay = await pay(request("/api/pay", { method: "POST", cookie, body: { plan: "pulse_weekly" } }));
     expect(repeatedPay.status).toBe(200);
     expect((await readJson<{ result: { access: string } }>(repeatedPay)).result.access).toBe("full");
+
+    const exported = await exportResults(request("/api/results/export", { cookie }));
+    expect(exported.status).toBe(200);
+    expect(exported.headers.get("content-disposition")).toContain("pulse-08-health-report.json");
+    const exportedPayload = await readJson<{ access: string; details?: { actionPlan: unknown[] } }>(exported);
+    expect(exportedPayload.access).toBe("full");
+    expect(exportedPayload.details?.actionPlan.length).toBe(3);
   });
 
   it("creates a new cookie-bound session when resetting", async () => {

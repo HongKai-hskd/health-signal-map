@@ -31,6 +31,8 @@ describe("health assessment algorithm", () => {
     expect(result.targetDate).toBe("2026-05-07");
     expect(result.curve[0].weightKg).toBe(76);
     expect(result.curve.at(-1)?.weightKg).toBe(68);
+    expect(result.actionPlan).toHaveLength(3);
+    expect(result.actionPlan[0].title).toContain("最低可行");
   });
 
   it.each([
@@ -131,6 +133,7 @@ describe("assessment persistence and access", () => {
     expect(paid.subscriptionStatus).toBe("active");
     expect(paid.details?.curve.length).toBeGreaterThan(1);
     expect(paid.details?.targetWeightKg).toBe(68);
+    expect(paid.details?.actionPlan).toHaveLength(3);
   });
 
   it("keeps a completed result idempotent and rejects stale writes", async () => {

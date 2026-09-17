@@ -8,9 +8,11 @@ import {
   users,
 } from "../db/schema";
 import {
+  createActionPlan,
   mergeAssessmentData,
   type AssessmentData,
   type HealthAssessment,
+  type HealthInput,
   type StepKey,
 } from "./domain";
 import {
@@ -159,6 +161,8 @@ export class D1AssessmentStore implements AssessmentStore {
       .where(eq(healthResults.sessionId, sessionId))
       .limit(1);
     if (!row) return null;
+    const input = JSON.parse(row.inputJson) as HealthInput;
+    const curve = JSON.parse(row.curveJson) as HealthAssessment["curve"];
     return {
       bmi: Number(row.bmiExact),
       bmiCategory: row.bmiCategory as HealthAssessment["bmiCategory"],
@@ -166,8 +170,9 @@ export class D1AssessmentStore implements AssessmentStore {
       targetDate: row.targetDate,
       score: row.score,
       insight: row.insight,
-      curve: JSON.parse(row.curveJson),
-      input: JSON.parse(row.inputJson),
+      curve,
+      actionPlan: createActionPlan(input, curve.at(-1)?.week ?? 6),
+      input,
     };
   }
 

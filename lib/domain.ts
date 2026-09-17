@@ -74,6 +74,13 @@ export type CurvePoint = {
   weightKg: number;
 };
 
+export type ActionPlanItem = {
+  week: number;
+  title: string;
+  description: string;
+  focus: string;
+};
+
 export type HealthAssessment = {
   bmi: number;
   bmiCategory: "low" | "balanced" | "high";
@@ -81,6 +88,7 @@ export type HealthAssessment = {
   targetDate: string;
   score: number;
   curve: CurvePoint[];
+  actionPlan: ActionPlanItem[];
   insight: string;
   input: HealthInput;
 };
@@ -103,6 +111,7 @@ export type PublicHealthResult = {
     targetWeightKg: number;
     curve: CurvePoint[];
     checkpoints: Array<{ week: number; label: string; weightKg: number }>;
+    actionPlan: ActionPlanItem[];
   };
 };
 
@@ -151,6 +160,44 @@ function createCurve(input: HealthInput, weeks: number): CurvePoint[] {
   return points;
 }
 
+export function createActionPlan(input: HealthInput, weeks: number): ActionPlanItem[] {
+  const middleWeek = Math.max(2, Math.round(weeks / 2));
+  const movementAnchor =
+    input.exerciseDays <= 1
+      ? "每周先安排 2 次 10–20 分钟的轻量活动"
+      : `保留每周 ${input.exerciseDays} 天的活动节奏`;
+  const goalTitle =
+    input.goal === "feel_lighter"
+      ? "把轻盈感放进日常"
+      : input.goal === "get_stronger"
+        ? "给力量留出位置"
+        : "让稳定变成默认选项";
+
+  return [
+    {
+      week: 1,
+      title: "先建立最低可行节奏",
+      description: `这一周只做一件事：${movementAnchor}，同时观察睡眠、精力和饥饿感。`,
+      focus: "稳定出现",
+    },
+    {
+      week: middleWeek,
+      title: goalTitle,
+      description: "把已经能重复的动作再加一点点难度，不追求一次做到完美。",
+      focus: "逐步增加",
+    },
+    {
+      week: weeks,
+      title: "回看并重新校准",
+      description: `在第 ${weeks} 周复盘身体反馈与生活安排，再决定下一段节奏，而不是被单一数字牵着走。`,
+      focus: "复盘调整",
+    },
+  ].filter(
+    (item, index, items) =>
+      items.findIndex((candidate) => candidate.week === item.week) === index,
+  );
+}
+
 export function calculateHealthAssessment(input: HealthInput, asOf = new Date()): HealthAssessment {
   const parsed = healthInputSchema.parse(input);
   const heightM = parsed.heightCm / 100;
@@ -169,6 +216,7 @@ export function calculateHealthAssessment(input: HealthInput, asOf = new Date())
     ),
   );
   const category = bmiCategory(bmi);
+  const curve = createCurve(parsed, weeks);
 
   return {
     bmi,
@@ -176,7 +224,8 @@ export function calculateHealthAssessment(input: HealthInput, asOf = new Date())
     calorieTarget,
     targetDate: targetDateFrom(asOf, weeks),
     score,
-    curve: createCurve(parsed, weeks),
+    curve,
+    actionPlan: createActionPlan(parsed, weeks),
     insight:
       category === "balanced"
         ? "你的身体基线处在稳定区间，小而持续的进步会真正带来变化。"
@@ -231,6 +280,7 @@ export function redactHealthAssessment(
       targetWeightKg: assessment.input.targetWeightKg,
       curve: assessment.curve,
       checkpoints,
+      actionPlan: assessment.actionPlan,
     },
   };
 }
