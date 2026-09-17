@@ -10,6 +10,13 @@
 - 结果页展示健康信号、可解释洞察和目标窗口，而不是只给一个分数；完整结果还会拆成四阶段行动路线、每周检查点和状态调整规则。
 - 不强制注册或填写邮箱，匿名 HttpOnly session 负责恢复进度；付款是可重放的演示回调。
 
+## 交付物导航
+
+- [交付物完成度清单](./docs/DELIVERY-CHECKLIST.md)
+- [自动化测试与 CI](./docs/TESTING.md)
+- [数据库 Schema 与 Mermaid ER 图](./docs/DATABASE-SCHEMA.md)
+- [AI 使用复盘](./docs/AI-RETROSPECTIVE.md)
+
 ## 需求完成度
 
 除公网部署相关交付物外，挑战要求的本地工程闭环已经完成：
@@ -23,7 +30,7 @@
 | 并发与状态一致性 | 已完成 | `Promise.all` 并发保存、完成态写保护、结果幂等 |
 | 自动化质量保障 | 已完成 | Vitest、TypeScript、lint、生产构建、D1 smoke、CI |
 | 数据模型与 Schema 图 | 已完成 | `db/schema.ts`、Drizzle migration、Mermaid ER 图 |
-| AI 使用复盘 | 已完成 | 本 README 的 AI 使用复盘章节 |
+| AI 使用复盘 | 已完成 | [独立复盘文档](./docs/AI-RETROSPECTIVE.md) |
 | 公网 URL、GitHub 链接、线上 sessionId | 待上线 | 按当前阶段暂不处理 |
 
 ## 技术栈
@@ -105,6 +112,8 @@ curl -sS -b pulse.cookies -OJ "$BASE/api/results/export"
 
 ## 数据模型
 
+完整字段职责和 Mermaid ER 图见：[数据库 Schema 文档](./docs/DATABASE-SCHEMA.md)。
+
 ```mermaid
 erDiagram
   users ||--o{ assessment_sessions : owns
@@ -159,6 +168,8 @@ erDiagram
 
 ## 测试覆盖
 
+独立测试说明、场景矩阵和 CI 流程见：[自动化测试文档](./docs/TESTING.md)。
+
 ```bash
 npm test
 ```
@@ -188,6 +199,8 @@ npm run test:d1
 GitHub Actions 在类型检查、lint、单元/Route 测试和生产构建后，还会初始化本地 D1、启动 Worker 并执行同一套 HTTP smoke，避免 CI 只验证内存实现。
 
 ## AI 使用复盘
+
+独立复盘见：[AI 使用复盘文档](./docs/AI-RETROSPECTIVE.md)。
 
 AI 协助拆分了实体关系、生成 Zod 边界数据、补齐测试矩阵和整理 API 文档；最终保留了“步骤表为事实来源”的模型，以避免并发保存不同步骤时读改写 `data_json` 造成丢数据。
 
