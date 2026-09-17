@@ -1,0 +1,160 @@
+import {
+  calculateHealthAssessment,
+  healthInputSchema,
+  mergeAssessmentData,
+  redactHealthAssessment,
+  STEP_KEYS,
+  stepSchemas,
+  type AssessmentData,
+  type HealthAssessment,
+  type PublicHealthResult,
+  type StepKey,
+} from "./domain";
+
+export type SubscriptionStatus = "inactive" | "active";
+
+export type SessionSnapshot = {
+  id: string;
+  userId: string;
+  status: "in_progress" | "completed";
+  currentStep: number;
+  data: AssessmentData;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AssessmentStore = {
+  createSession(): Promise<SessionSnapshot>;
+  getSession(sessionId: string): Promise<SessionSnapshot | null>;
+  saveStep(sessionId: string, step: StepKey, data: AssessmentData): Promise<SessionSnapshot>;
+  saveResult(sessionId: string, result: HealthAssessment): Promise<void>;
+  getResult(sessionId: string): Promise<HealthAssessment | null>;
+  getSubscriptionStatus(sessionId: string): Promise<SubscriptionStatus>;
+  activateSubscription(sessionId: string): Promise<void>;
+};
+
+export class AssessmentError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+    this.name = "AssessmentError";
+  }
+}
+
+export class AssessmentService {
+  constructor(private readonly store: AssessmentStore) {}
+
+  async getOrCreateSession(sessionId?: string) {
+    if (sessionId) {
+      const session = await this.store.getSession(sessionId);
+      if (session) return { session, created: false };
+    }
+    return { session: await this.store.createSession(), created: true };
+  }
+
+  async saveStep(sessionId: string, step: string, data: Record<string, unknown>) {
+    if (!STEP_KEYS.includes(step as StepKey)) {
+      throw new AssessmentError("未知的测评步骤。", 400);
+    }
+    const stepKey = step as StepKey;
+    const parsed = stepSchemas[stepKey].parse(data);
+    const session = await this.store.getSession(sessionId);
+    if (!session) throw new AssessmentError("找不到测评会话。", 404);
+    return this.store.saveStep(sessionId, stepKey, parsed);
+  }
+
+  async complete(sessionId: string) {
+    const session = await this.store.getSession(sessionId);
+    if (!session) throw new AssessmentError("找不到测评会话。", 404);
+    const input = healthInputSchema.parse(session.data);
+    const result = calculateHealthAssessment(input);
+    await this.store.saveResult(sessionId, result);
+    return result;
+  }
+
+  async getResults(sessionId: string): Promise<PublicHealthResult> {
+    const result = await this.store.getResult(sessionId);
+    if (!result) throw new AssessmentError("请先完成测评，再查看结果。", 409);
+    const subscriptionStatus = await this.store.getSubscriptionStatus(sessionId);
+    return redactHealthAssessment(sessionId, result, subscriptionStatus);
+  }
+
+  async pay(sessionId: string) {
+    const result = await this.store.getResult(sessionId);
+    if (!result) throw new AssessmentError("请先完成测评，再解锁完整地图。", 409);
+    await this.store.activateSubscription(sessionId);
+    return this.getResults(sessionId);
+  }
+}
+
+export class InMemoryAssessmentStore implements AssessmentStore {
+  private readonly sessions = new Map<
+    string,
+    { session: SessionSnapshot; steps: Map<StepKey, AssessmentData> }
+  >();
+  private readonly results = new Map<string, HealthAssessment>();
+  private readonly subscriptions = new Map<string, SubscriptionStatus>();
+
+  async createSession() {
+    const now = new Date().toISOString();
+    const id = crypto.randomUUID();
+    const session: SessionSnapshot = {
+      id,
+      userId: crypto.randomUUID(),
+      status: "in_progress",
+      currentStep: 0,
+      data: {},
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.sessions.set(id, { session, steps: new Map() });
+    this.subscriptions.set(id, "inactive");
+    return session;
+  }
+
+  async getSession(sessionId: string) {
+    const entry = this.sessions.get(sessionId);
+    if (!entry) return null;
+    return this.snapshot(entry);
+  }
+
+  async saveStep(sessionId: string, step: StepKey, data: AssessmentData) {
+    const entry = this.sessions.get(sessionId);
+    if (!entry) throw new AssessmentError("找不到测评会话。", 404);
+    entry.steps.set(step, data);
+    entry.session.currentStep = Math.max(entry.session.currentStep, STEP_KEYS.indexOf(step) + 1);
+    entry.session.updatedAt = new Date().toISOString();
+    return this.snapshot(entry);
+  }
+
+  async saveResult(sessionId: string, result: HealthAssessment) {
+    if (!this.sessions.has(sessionId)) throw new AssessmentError("找不到测评会话。", 404);
+    this.results.set(sessionId, result);
+    const entry = this.sessions.get(sessionId)!;
+    entry.session.status = "completed";
+    entry.session.currentStep = STEP_KEYS.length;
+    entry.session.updatedAt = new Date().toISOString();
+  }
+
+  async getResult(sessionId: string) {
+    return this.results.get(sessionId) ?? null;
+  }
+
+  async getSubscriptionStatus(sessionId: string) {
+    return this.subscriptions.get(sessionId) ?? "inactive";
+  }
+
+  async activateSubscription(sessionId: string) {
+    if (!this.sessions.has(sessionId)) throw new AssessmentError("找不到测评会话。", 404);
+    this.subscriptions.set(sessionId, "active");
+  }
+
+  private snapshot(entry: { session: SessionSnapshot; steps: Map<StepKey, AssessmentData> }) {
+    return {
+      ...entry.session,
+      data: mergeAssessmentData([...entry.steps.values()]),
+    };
+  }
+}
