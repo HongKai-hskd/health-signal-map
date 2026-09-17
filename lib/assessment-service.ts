@@ -54,6 +54,10 @@ export class AssessmentService {
     return { session: await this.store.createSession(), created: true };
   }
 
+  async startFreshSession() {
+    return this.store.createSession();
+  }
+
   async saveStep(sessionId: string, step: string, data: Record<string, unknown>) {
     if (!STEP_KEYS.includes(step as StepKey)) {
       throw new AssessmentError("未知的测评步骤。", 400);
@@ -62,12 +66,19 @@ export class AssessmentService {
     const parsed = stepSchemas[stepKey].parse(data);
     const session = await this.store.getSession(sessionId);
     if (!session) throw new AssessmentError("找不到测评会话。", 404);
+    if (session.status === "completed") {
+      throw new AssessmentError("这份测评已经完成，请重新开始新的测评。", 409);
+    }
     return this.store.saveStep(sessionId, stepKey, parsed);
   }
 
   async complete(sessionId: string) {
     const session = await this.store.getSession(sessionId);
     if (!session) throw new AssessmentError("找不到测评会话。", 404);
+    if (session.status === "completed") {
+      const existing = await this.store.getResult(sessionId);
+      if (existing) return existing;
+    }
     const input = healthInputSchema.parse(session.data);
     const result = calculateHealthAssessment(input);
     await this.store.saveResult(sessionId, result);

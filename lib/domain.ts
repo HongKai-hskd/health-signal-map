@@ -201,6 +201,7 @@ export function redactHealthAssessment(
     insight: assessment.insight,
   };
   if (subscriptionStatus !== "active") {
+    const totalWeeks = assessment.curve.at(-1)?.week ?? 6;
     return {
       sessionId,
       access: "preview",
@@ -208,7 +209,7 @@ export function redactHealthAssessment(
       summary,
       protected: {
         locked: true,
-        message: "解锁完整的 12 周路径、每周检查点和趋势变化。",
+        message: `解锁完整的 ${totalWeeks} 周路径、每周检查点和趋势变化。`,
       },
     };
   }

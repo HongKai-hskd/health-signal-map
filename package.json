@@ -13,6 +13,7 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
     "test": "vitest run",
+    "test:d1": "node scripts/test-d1-http.mjs",
     "test:watch": "vitest"
   },
   "dependencies": {

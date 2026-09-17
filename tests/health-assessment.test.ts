@@ -7,6 +7,7 @@ import {
 import {
   AssessmentService,
   InMemoryAssessmentStore,
+  type SessionSnapshot,
 } from "../lib/assessment-service";
 
 const validInput: HealthInput = {
@@ -84,6 +85,21 @@ describe("assessment persistence and access", () => {
     expect(resumed.session.currentStep).toBe(4);
   });
 
+  it("keeps every step when different steps are saved concurrently", async () => {
+    const { service, session } = await setup();
+    await Promise.all([
+      service.saveStep(session.id, "identity", { gender: validInput.gender }),
+      service.saveStep(session.id, "goal", { goal: validInput.goal }),
+      service.saveStep(session.id, "activity", { activityLevel: validInput.activityLevel, exerciseDays: validInput.exerciseDays }),
+      service.saveStep(session.id, "body", { age: validInput.age, heightCm: validInput.heightCm, weightKg: validInput.weightKg }),
+      service.saveStep(session.id, "target", { targetWeightKg: validInput.targetWeightKg }),
+    ]);
+
+    const resumed = await service.getOrCreateSession(session.id);
+    expect(resumed.session.data).toMatchObject(validInput);
+    expect(resumed.session.currentStep).toBe(5);
+  });
+
   it("returns a redacted preview that never contains the protected curve", async () => {
     const { service, session } = await setup();
     await service.saveStep(session.id, "identity", { gender: validInput.gender });
@@ -96,6 +112,7 @@ describe("assessment persistence and access", () => {
     const preview = await service.getResults(session.id);
     expect(preview.access).toBe("preview");
     expect(preview.protected?.locked).toBe(true);
+    expect(preview.protected?.message).toContain("18 周");
     expect(preview).not.toHaveProperty("details");
     expect(JSON.stringify(preview)).not.toContain("curve");
   });
@@ -114,5 +131,37 @@ describe("assessment persistence and access", () => {
     expect(paid.subscriptionStatus).toBe("active");
     expect(paid.details?.curve.length).toBeGreaterThan(1);
     expect(paid.details?.targetWeightKg).toBe(68);
+  });
+
+  it("keeps a completed result idempotent and rejects stale writes", async () => {
+    const { service, session } = await setup();
+    await service.saveStep(session.id, "identity", { gender: validInput.gender });
+    await service.saveStep(session.id, "goal", { goal: validInput.goal });
+    await service.saveStep(session.id, "activity", { activityLevel: validInput.activityLevel, exerciseDays: validInput.exerciseDays });
+    await service.saveStep(session.id, "body", { age: validInput.age, heightCm: validInput.heightCm, weightKg: validInput.weightKg });
+    await service.saveStep(session.id, "target", { targetWeightKg: validInput.targetWeightKg });
+
+    const first = await service.complete(session.id);
+    const second = await service.complete(session.id);
+
+    expect(second).toEqual(first);
+    await expect(service.saveStep(session.id, "body", { age: 33, heightCm: 168, weightKg: 75 })).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("starts a fresh session instead of reusing a completed assessment", async () => {
+    const { service, session } = await setup();
+    await service.saveStep(session.id, "identity", { gender: validInput.gender });
+    await service.saveStep(session.id, "goal", { goal: validInput.goal });
+    await service.saveStep(session.id, "activity", { activityLevel: validInput.activityLevel, exerciseDays: validInput.exerciseDays });
+    await service.saveStep(session.id, "body", { age: validInput.age, heightCm: validInput.heightCm, weightKg: validInput.weightKg });
+    await service.saveStep(session.id, "target", { targetWeightKg: validInput.targetWeightKg });
+    await service.complete(session.id);
+
+    const fresh = await (service as AssessmentService & { startFreshSession: () => Promise<SessionSnapshot> }).startFreshSession();
+
+    expect(fresh.id).not.toBe(session.id);
+    expect(fresh.status).toBe("in_progress");
+    expect(fresh.currentStep).toBe(0);
+    expect(fresh.data).toEqual({});
   });
 });

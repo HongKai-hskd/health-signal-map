@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import {
   assessmentSessions,
@@ -27,16 +27,18 @@ export class D1AssessmentStore implements AssessmentStore {
     const now = new Date().toISOString();
     const id = crypto.randomUUID();
     const userId = crypto.randomUUID();
-    await this.db.insert(users).values({ id: userId, anonymousKey: userId });
-    await this.db.insert(assessmentSessions).values({
-      id,
-      userId,
-      status: "in_progress",
-      currentStep: 0,
-      createdAt: now,
-      updatedAt: now,
-    });
-    await this.db.insert(subscriptions).values({ sessionId: id, status: "inactive" });
+    await this.db.batch([
+      this.db.insert(users).values({ id: userId, anonymousKey: userId }),
+      this.db.insert(assessmentSessions).values({
+        id,
+        userId,
+        status: "in_progress",
+        currentStep: 0,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      this.db.insert(subscriptions).values({ sessionId: id, status: "inactive" }),
+    ]);
     return {
       id,
       userId,
@@ -83,22 +85,24 @@ export class D1AssessmentStore implements AssessmentStore {
       .from(assessmentSessions)
       .where(eq(assessmentSessions.id, sessionId))
       .limit(1);
-    if (!session) throw new AssessmentError("Assessment session not found.", 404);
+    if (!session) throw new AssessmentError("找不到测评会话。", 404);
 
-    await this.db
-      .insert(assessmentSteps)
-      .values({ sessionId, stepKey: step, payloadJson: JSON.stringify(data), updatedAt: now })
-      .onConflictDoUpdate({
-        target: [assessmentSteps.sessionId, assessmentSteps.stepKey],
-        set: { payloadJson: JSON.stringify(data), updatedAt: now },
-      });
-    await this.db
-      .update(assessmentSessions)
-      .set({
-        currentStep: sql`max(${assessmentSessions.currentStep}, ${stepIndex})`,
-        updatedAt: now,
-      })
-      .where(eq(assessmentSessions.id, sessionId));
+    await this.db.batch([
+      this.db
+        .insert(assessmentSteps)
+        .values({ sessionId, stepKey: step, payloadJson: JSON.stringify(data), updatedAt: now })
+        .onConflictDoUpdate({
+          target: [assessmentSteps.sessionId, assessmentSteps.stepKey],
+          set: { payloadJson: JSON.stringify(data), updatedAt: now },
+        }),
+      this.db
+        .update(assessmentSessions)
+        .set({
+          currentStep: sql`max(${assessmentSessions.currentStep}, ${stepIndex})`,
+          updatedAt: now,
+        })
+        .where(eq(assessmentSessions.id, sessionId)),
+    ]);
     return (await this.getSession(sessionId))!;
   }
 
@@ -109,26 +113,13 @@ export class D1AssessmentStore implements AssessmentStore {
       .from(assessmentSessions)
       .where(eq(assessmentSessions.id, sessionId))
       .limit(1);
-    if (!session) throw new AssessmentError("Assessment session not found.", 404);
+    if (!session) throw new AssessmentError("找不到测评会话。", 404);
 
-    await this.db
-      .insert(healthResults)
-      .values({
-        sessionId,
-        bmi: Math.round(result.bmi),
-        bmiExact: result.bmi.toFixed(1),
-        bmiCategory: result.bmiCategory,
-        calorieTarget: result.calorieTarget,
-        targetDate: result.targetDate,
-        score: result.score,
-        insight: result.insight,
-        curveJson: JSON.stringify(result.curve),
-        inputJson: JSON.stringify(result.input),
-        createdAt: now,
-      })
-      .onConflictDoUpdate({
-        target: healthResults.sessionId,
-        set: {
+    await this.db.batch([
+      this.db
+        .insert(healthResults)
+        .values({
+          sessionId,
           bmi: Math.round(result.bmi),
           bmiExact: result.bmi.toFixed(1),
           bmiCategory: result.bmiCategory,
@@ -138,12 +129,27 @@ export class D1AssessmentStore implements AssessmentStore {
           insight: result.insight,
           curveJson: JSON.stringify(result.curve),
           inputJson: JSON.stringify(result.input),
-        },
-      });
-    await this.db
-      .update(assessmentSessions)
-      .set({ status: "completed", currentStep: 5, updatedAt: now })
-      .where(eq(assessmentSessions.id, sessionId));
+          createdAt: now,
+        })
+        .onConflictDoUpdate({
+          target: healthResults.sessionId,
+          set: {
+            bmi: Math.round(result.bmi),
+            bmiExact: result.bmi.toFixed(1),
+            bmiCategory: result.bmiCategory,
+            calorieTarget: result.calorieTarget,
+            targetDate: result.targetDate,
+            score: result.score,
+            insight: result.insight,
+            curveJson: JSON.stringify(result.curve),
+            inputJson: JSON.stringify(result.input),
+          },
+        }),
+      this.db
+        .update(assessmentSessions)
+        .set({ status: "completed", currentStep: 5, updatedAt: now })
+        .where(eq(assessmentSessions.id, sessionId)),
+    ]);
   }
 
   async getResult(sessionId: string): Promise<HealthAssessment | null> {

@@ -45,10 +45,13 @@ node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
 | GET | `/api/assessment` | 创建或恢复当前 session |
+| POST | `/api/assessment/reset` | 创建全新的测评 session，旧结果保留但不再复用 |
 | PATCH | `/api/assessment` | 保存一个步骤，支持乱序和重复提交 |
 | POST | `/api/assessment/complete` | 服务端校验完整数据并生成结果 |
 | GET | `/api/results` | 会员返回完整数据，非会员不返回 `details/curve` |
-| POST | `/api/pay` | 模拟支付回调，将订阅状态改为 active |
+| POST | `/api/pay` | 校验 `plan=pulse_weekly`，模拟幂等支付回调并将订阅状态改为 active |
+
+接口约束：没有 `pulse_session` Cookie 的写入/结果请求返回 `401`；非法步骤返回 `400`；非法 JSON 返回 `400`；Zod 数据校验失败返回 `422`；已完成 session 不允许继续修改，返回 `409`，需要通过 reset 开始新测评。
 
 ### 可重放的 `/pay` 流程
 
@@ -84,11 +87,50 @@ curl -sS -b pulse.cookies "$BASE/api/results"
 
 ## 数据模型
 
-```text
-users 1 ──────── N assessment_sessions 1 ──────── N assessment_steps
-                         │
-                         ├──────── 1 health_results
-                         └──────── 1 subscriptions
+```mermaid
+erDiagram
+  users ||--o{ assessment_sessions : owns
+  assessment_sessions ||--o{ assessment_steps : records
+  assessment_sessions ||--o| health_results : produces
+  assessment_sessions ||--o| subscriptions : unlocks
+
+  users {
+    text id PK
+    text anonymous_key UK
+    text created_at
+  }
+  assessment_sessions {
+    text id PK
+    text user_id FK
+    text status
+    integer current_step
+    text created_at
+    text updated_at
+  }
+  assessment_steps {
+    integer id PK
+    text session_id FK
+    text step_key
+    text payload_json
+    text updated_at
+  }
+  health_results {
+    integer id PK
+    text session_id FK
+    text bmi_exact
+    integer calorie_target
+    text target_date
+    integer score
+    text curve_json
+    text input_json
+  }
+  subscriptions {
+    integer id PK
+    text session_id FK
+    text status
+    text plan_code
+    text paid_at
+  }
 ```
 
 - `assessment_steps` 以 `(session_id, step_key)` 唯一约束保存增量数据，是进度恢复和并发更新的事实来源。
@@ -102,16 +144,26 @@ users 1 ──────── N assessment_sessions 1 ───────�
 npm test
 ```
 
-当前覆盖 12 个场景：
+`npm test` 当前覆盖 19 个单元、Route 级集成场景：
 
 - BMI、热量、目标日期、趋势曲线的服务端计算
 - 年龄、身高、体重的上下界和极端值
 - 目标体重范围与“减重目标却填增重”的矛盾输入
-- 分步保存、中断恢复、乱序提交、重复提交
+- 分步保存、中断恢复、乱序提交、重复提交、不同步骤并发更新
+- Cookie 会话创建与恢复、无 Cookie 鉴权、非法 JSON、未知步骤、非法数值、数组 data
 - 非会员脱敏，明确断言响应 JSON 不含 `curve`
-- `/pay` 状态变化及会员结果从 preview 到 full 的端到端服务闭环
+- `/pay` plan 校验、重复回调幂等、会员结果从 preview 到 full 的 Route 级闭环
+- 完成结果幂等、已完成 session 拒绝过期写入、重新测评创建新 session
 
-暂未覆盖真实第三方支付签名和生产 D1 网络故障重试，因为本题要求的是可重放的模拟回调；生产化时应为 `/api/pay` 增加 provider 签名校验、幂等键和审计日志。
+本地 D1 HTTP smoke 测试需要先启动完整 Worker：
+
+```bash
+npm start
+npm run test:d1
+# 也可以：BASE_URL=https://your-host.example npm run test:d1
+```
+
+它会真实调用 API，覆盖 D1 Cookie 会话、分步持久化、preview/full、重复支付、完成态写保护和 reset。并发更新由 `npm test` 中的 `Promise.all` 场景覆盖；暂未覆盖真实第三方支付签名、支付 provider 事件审计和生产 D1 网络故障，因为本题要求的是可重放的模拟回调；生产化时应为 `/api/pay` 增加 provider 签名校验和支付事件表。
 
 ## AI 使用复盘
 

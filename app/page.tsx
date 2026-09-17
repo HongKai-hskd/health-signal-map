@@ -47,9 +47,15 @@ async function api<T>(url: string, init?: RequestInit) {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     credentials: "same-origin",
   });
-  const payload = (await response.json()) as T & { error?: string };
+  const raw = await response.text();
+  let payload: (T & { error?: string }) | null = null;
+  try {
+    payload = JSON.parse(raw) as T & { error?: string };
+  } catch {
+    throw new Error(response.ok ? "服务器返回了无法解析的响应。" : "服务暂时不可用，请稍后再试。");
+  }
   if (!response.ok) throw new Error(payload.error ?? "发生了一点问题。");
-  return payload;
+  return payload as T;
 }
 
 function ChoiceCard({ label, description, icon: Icon, selected, onClick }: ChoiceProps) {
@@ -112,18 +118,20 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [paying, setPaying] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => { void (async () => { try { const payload = await api<ApiSessionResponse>("/api/assessment"); setSession(payload.session); setForm(payload.session.data); setStepIndex(Math.min(payload.session.currentStep, STEP_COUNT - 1)); if (payload.resultReady) { const resultPayload = await api<PublicHealthResult>("/api/results"); setResult(resultPayload); setScreen("results"); } } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "暂时无法开始测评。"); } finally { setLoading(false); } })(); }, []);
 
   const saveStep = async (step: string, data: Record<string, unknown>) => { setSaving(true); setError(null); try { const payload = await api<{ session: SessionSnapshot }>("/api/assessment", { method: "PATCH", body: JSON.stringify({ step, data }) }); setSession(payload.session); setForm(payload.session.data); return true; } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "这一步保存失败了，请再试一次。"); return false; } finally { setSaving(false); } };
   const choose = async (step: string, data: Record<string, unknown>) => { const saved = await saveStep(step, data); if (saved) setStepIndex((current) => Math.min(current + 1, STEP_COUNT - 1)); };
-  const goNext = async () => { if (stepIndex === 3) { if (!form.age || !form.heightCm || !form.weightKg) return setError("请填写年龄、身高和当前体重后继续。"); if (form.age < 16 || form.age > 90 || form.heightCm < 120 || form.heightCm > 230 || form.weightKg < 35 || form.weightKg > 250) return setError("请使用每个输入框标注范围内的数值。"); if (await saveStep("body", { age: form.age, heightCm: form.heightCm, weightKg: form.weightKg })) setStepIndex(4); return; } if (stepIndex === 4) { if (!form.targetWeightKg) return setError("请填写目标体重后继续。"); if (await saveStep("target", { targetWeightKg: form.targetWeightKg })) setStepIndex(5); } };
+  const goNext = async () => { if (stepIndex === 3) { if (!form.age || !form.heightCm || !form.weightKg) return setError("请填写年龄、身高和当前体重后继续。"); if (form.age < 16 || form.age > 90 || form.heightCm < 120 || form.heightCm > 230 || form.weightKg < 35 || form.weightKg > 250) return setError("请使用每个输入框标注范围内的数值。"); if (await saveStep("body", { age: form.age, heightCm: form.heightCm, weightKg: form.weightKg })) setStepIndex(4); return; } if (stepIndex === 4) { if (!form.targetWeightKg) return setError("请填写目标体重后继续。"); if (form.targetWeightKg < 35 || form.targetWeightKg > 250) return setError("目标体重需要在 35–250 kg 之间。"); if (form.weightKg && (form.targetWeightKg < form.weightKg * 0.55 || form.targetWeightKg > form.weightKg * 1.3)) return setError("目标体重需要处在当前体重的合理范围内。"); if (form.goal === "feel_lighter" && form.weightKg && form.targetWeightKg >= form.weightKg) return setError("如果目标是更轻盈，目标体重需要低于当前体重。"); if (await saveStep("target", { targetWeightKg: form.targetWeightKg })) setStepIndex(5); } };
   const complete = async () => { setSaving(true); setError(null); try { const payload = await api<{ result: PublicHealthResult }>("/api/assessment/complete", { method: "POST" }); setResult(payload.result); setScreen("results"); } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "请先补全缺少的信息。"); } finally { setSaving(false); } };
   const pay = async () => { setPaying(true); setError(null); try { const payload = await api<{ result: PublicHealthResult }>("/api/pay", { method: "POST", body: JSON.stringify({ plan: "pulse_weekly" }) }); setResult(payload.result); } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "演示支付没有完成，请再试一次。"); } finally { setPaying(false); } };
+  const restart = async () => { if (restarting) return; setRestarting(true); setError(null); try { let payload: ApiSessionResponse; try { payload = await api<ApiSessionResponse>("/api/assessment/reset", { method: "POST" }); } catch { payload = await api<ApiSessionResponse>("/api/assessment/reset", { method: "POST" }); } setSession(payload.session); setForm(payload.session.data); setStepIndex(0); setResult(null); setScreen("assessment"); } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "暂时无法开始新的测评，请再试一次。"); } finally { setRestarting(false); } };
 
   if (loading) return <main className="loading-screen"><span className="brand-mark"><HeartPulse size={20} /></span><span>正在校准你的专属会话…</span></main>;
-  if (screen === "results" && result) return <ResultsView result={result} paying={paying} onPay={pay} onRestart={() => window.location.reload()} />;
+  if (screen === "results" && result) return <><ResultsView result={result} paying={paying} onPay={pay} onRestart={() => { if (!restarting) void restart(); }} />{error ? <p className="error-message results-error" role="alert">{error}</p> : null}</>;
   if (!session) return <main className="loading-screen"><span>{error ?? "暂时无法开始测评。"}</span></main>;
 
   const choiceStep = (content: ReactNode, eyebrow: string, title: string, description: string) => <><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="step-description">{description}</p><div className="choice-list">{content}</div></>;
