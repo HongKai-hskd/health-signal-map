@@ -60,3 +60,25 @@ CREATE TABLE IF NOT EXISTS `subscriptions` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS `uq_subscriptions_session_id` ON `subscriptions` (`session_id`);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS `payment_orders` (
+  `id` text PRIMARY KEY NOT NULL,
+  `session_id` text NOT NULL,
+  `order_no` text NOT NULL,
+  `provider` text NOT NULL,
+  `plan_code` text NOT NULL,
+  `amount_fen` integer NOT NULL,
+  `status` text DEFAULT 'pending' NOT NULL,
+  `checkout_token` text NOT NULL,
+  `expires_at` text NOT NULL,
+  `paid_at` text,
+  `created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  `updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  FOREIGN KEY (`session_id`) REFERENCES `assessment_sessions`(`id`)
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS `uq_payment_orders_order_no` ON `payment_orders` (`order_no`);
+--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS `uq_payment_orders_checkout_token` ON `payment_orders` (`checkout_token`);
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_payment_orders_session_status` ON `payment_orders` (`session_id`,`status`);

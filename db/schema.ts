@@ -91,3 +91,30 @@ export const subscriptions = sqliteTable(
   },
   (table) => [uniqueIndex("uq_subscriptions_session_id").on(table.sessionId)],
 );
+
+export const paymentOrders = sqliteTable(
+  "payment_orders",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => assessmentSessions.id),
+    orderNo: text("order_no").notNull(),
+    provider: text("provider", { enum: ["wechat_mock"] }).notNull(),
+    planCode: text("plan_code", { enum: ["pulse_weekly"] }).notNull(),
+    amountFen: integer("amount_fen").notNull(),
+    status: text("status", { enum: ["pending", "paid", "expired"] })
+      .notNull()
+      .default("pending"),
+    checkoutToken: text("checkout_token").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    paidAt: text("paid_at"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("uq_payment_orders_order_no").on(table.orderNo),
+    uniqueIndex("uq_payment_orders_checkout_token").on(table.checkoutToken),
+    index("idx_payment_orders_session_status").on(table.sessionId, table.status),
+  ],
+);

@@ -10,6 +10,7 @@ import {
   type PublicHealthResult,
   type StepKey,
 } from "./domain";
+import type { PaymentOrder, PaymentOrderStore } from "./payment-service";
 
 export type SubscriptionStatus = "inactive" | "active";
 
@@ -100,13 +101,14 @@ export class AssessmentService {
   }
 }
 
-export class InMemoryAssessmentStore implements AssessmentStore {
+export class InMemoryAssessmentStore implements AssessmentStore, PaymentOrderStore {
   private readonly sessions = new Map<
     string,
     { session: SessionSnapshot; steps: Map<StepKey, AssessmentData> }
   >();
   private readonly results = new Map<string, HealthAssessment>();
   private readonly subscriptions = new Map<string, SubscriptionStatus>();
+  private readonly paymentOrders = new Map<string, PaymentOrder>();
 
   async createSession() {
     const now = new Date().toISOString();
@@ -163,6 +165,50 @@ export class InMemoryAssessmentStore implements AssessmentStore {
   async activateSubscription(sessionId: string) {
     if (!this.sessions.has(sessionId)) throw new AssessmentError("找不到测评会话。", 404);
     this.subscriptions.set(sessionId, "active");
+  }
+
+  async createPaymentOrder(order: PaymentOrder) {
+    this.paymentOrders.set(order.id, { ...order });
+    return { ...order };
+  }
+
+  async getLatestPendingPaymentOrder(sessionId: string) {
+    const orders = [...this.paymentOrders.values()]
+      .filter((order) => order.sessionId === sessionId && order.status === "pending")
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    return orders[0] ? { ...orders[0] } : null;
+  }
+
+  async getPaymentOrder(sessionId: string, orderId: string) {
+    const order = this.paymentOrders.get(orderId);
+    return order?.sessionId === sessionId ? { ...order } : null;
+  }
+
+  async getPaymentOrderByCheckoutToken(checkoutToken: string) {
+    const order = [...this.paymentOrders.values()].find((entry) => entry.checkoutToken === checkoutToken);
+    return order ? { ...order } : null;
+  }
+
+  async expirePaymentOrder(orderId: string, updatedAt: string) {
+    const order = this.paymentOrders.get(orderId);
+    if (!order) return null;
+    if (order.status === "pending") {
+      order.status = "expired";
+      order.updatedAt = updatedAt;
+    }
+    return { ...order };
+  }
+
+  async confirmPaymentOrder(orderId: string, paidAt: string) {
+    const order = this.paymentOrders.get(orderId);
+    if (!order) return null;
+    if (order.status === "pending") {
+      order.status = "paid";
+      order.paidAt = paidAt;
+      order.updatedAt = paidAt;
+      this.subscriptions.set(order.sessionId, "active");
+    }
+    return { ...order };
   }
 
   private snapshot(entry: { session: SessionSnapshot; steps: Map<StepKey, AssessmentData> }) {

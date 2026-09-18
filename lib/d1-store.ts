@@ -1,9 +1,10 @@
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import {
   assessmentSessions,
   assessmentSteps,
   healthResults,
+  paymentOrders,
   subscriptions,
   users,
 } from "../db/schema";
@@ -23,8 +24,12 @@ import {
   type SessionSnapshot,
   type SubscriptionStatus,
 } from "./assessment-service";
+import type {
+  PaymentOrder,
+  PaymentOrderStore,
+} from "./payment-service";
 
-export class D1AssessmentStore implements AssessmentStore {
+export class D1AssessmentStore implements AssessmentStore, PaymentOrderStore {
   private readonly db = getDb();
 
   async createSession(): Promise<SessionSnapshot> {
@@ -201,5 +206,106 @@ export class D1AssessmentStore implements AssessmentStore {
         target: subscriptions.sessionId,
         set: { status: "active", paidAt: now, updatedAt: now },
       });
+  }
+
+  async createPaymentOrder(order: PaymentOrder) {
+    await this.db.insert(paymentOrders).values({
+      id: order.id,
+      sessionId: order.sessionId,
+      orderNo: order.orderNo,
+      provider: order.provider,
+      planCode: order.plan,
+      amountFen: order.amountFen,
+      status: order.status,
+      checkoutToken: order.checkoutToken,
+      expiresAt: order.expiresAt,
+      paidAt: order.paidAt,
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
+    });
+    return order;
+  }
+
+  async getLatestPendingPaymentOrder(sessionId: string) {
+    const [row] = await this.db
+      .select()
+      .from(paymentOrders)
+      .where(and(eq(paymentOrders.sessionId, sessionId), eq(paymentOrders.status, "pending")))
+      .orderBy(desc(paymentOrders.createdAt))
+      .limit(1);
+    return row ? this.toPaymentOrder(row) : null;
+  }
+
+  async getPaymentOrder(sessionId: string, orderId: string) {
+    const [row] = await this.db
+      .select()
+      .from(paymentOrders)
+      .where(and(eq(paymentOrders.sessionId, sessionId), eq(paymentOrders.id, orderId)))
+      .limit(1);
+    return row ? this.toPaymentOrder(row) : null;
+  }
+
+  async getPaymentOrderByCheckoutToken(checkoutToken: string) {
+    const [row] = await this.db
+      .select()
+      .from(paymentOrders)
+      .where(eq(paymentOrders.checkoutToken, checkoutToken))
+      .limit(1);
+    return row ? this.toPaymentOrder(row) : null;
+  }
+
+  async expirePaymentOrder(orderId: string, updatedAt: string) {
+    await this.db
+      .update(paymentOrders)
+      .set({ status: "expired", updatedAt })
+      .where(and(eq(paymentOrders.id, orderId), eq(paymentOrders.status, "pending")));
+    return this.getPaymentOrderById(orderId);
+  }
+
+  async confirmPaymentOrder(orderId: string, paidAt: string) {
+    const order = await this.getPaymentOrderById(orderId);
+    if (!order) return null;
+    if (order.status === "pending") {
+      await this.db.batch([
+        this.db
+          .update(paymentOrders)
+          .set({ status: "paid", paidAt, updatedAt: paidAt })
+          .where(and(eq(paymentOrders.id, orderId), eq(paymentOrders.status, "pending"))),
+        this.db
+          .insert(subscriptions)
+          .values({ sessionId: order.sessionId, status: "active", paidAt, updatedAt: paidAt })
+          .onConflictDoUpdate({
+            target: subscriptions.sessionId,
+            set: { status: "active", paidAt, updatedAt: paidAt },
+          }),
+      ]);
+    }
+    return this.getPaymentOrderById(orderId);
+  }
+
+  private async getPaymentOrderById(orderId: string) {
+    const [row] = await this.db
+      .select()
+      .from(paymentOrders)
+      .where(eq(paymentOrders.id, orderId))
+      .limit(1);
+    return row ? this.toPaymentOrder(row) : null;
+  }
+
+  private toPaymentOrder(row: typeof paymentOrders.$inferSelect): PaymentOrder {
+    return {
+      id: row.id,
+      sessionId: row.sessionId,
+      orderNo: row.orderNo,
+      provider: "wechat_mock",
+      plan: "pulse_weekly",
+      amountFen: row.amountFen,
+      status: row.status as PaymentOrder["status"],
+      checkoutToken: row.checkoutToken,
+      expiresAt: row.expiresAt,
+      paidAt: row.paidAt,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
   }
 }
