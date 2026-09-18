@@ -13,6 +13,7 @@
 ## 交付物导航
 
 - [交付物完成度清单](./docs/DELIVERY-CHECKLIST.md)
+- [主交付文档](./docs/DELIVERY.md)
 - [API 完整参考](./docs/API.md)
 - [自动化测试与 CI](./docs/TESTING.md)
 - [数据库 Schema 与 Mermaid ER 图](./docs/DATABASE-SCHEMA.md)
