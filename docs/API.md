@@ -2,7 +2,7 @@
 
 ## 认证与会话
 
-系统使用匿名 `pulse_session` HttpOnly Cookie 绑定一次测评会话。除 `POST /api/assessment/reset` 外，写入和结果接口都要求该 Cookie；reset 是“开始新测评”的入口，即使没有旧 Cookie 也会创建新 session 并下发 Cookie。
+系统使用匿名 `pulse_session` HttpOnly Cookie 绑定一次测评会话。除 `POST /api/assessment/reset` 外，写入和结果接口都要求该 Cookie；唯一例外是扫码后的 `/api/pay/mock`，它使用随机的 `checkoutToken` 表示模拟付款方。reset 是“开始新测评”的入口，即使没有旧 Cookie 也会创建新 session 并下发 Cookie。
 
 服务端不会信任前端传入的用户 ID、订阅状态或计算结果。所有结果都通过当前 Cookie 解析 session，再从 D1 读取。
 
@@ -13,7 +13,8 @@
 | `200` | 请求成功 |
 | `400` | JSON 无效、缺少基础字段或步骤名为空 |
 | `401` | 缺少有效 `pulse_session` Cookie |
-| `409` | 当前 session 状态不允许该操作，例如未完成就查看结果、完成后继续写入 |
+| `404` | 当前 session、支付订单或二维码 token 不存在 |
+| `409` | 当前状态不允许该操作，例如未完成就查看结果、完成后继续写入或二维码过期 |
 | `422` | Zod 校验失败、越界值、未知字段或不支持的支付方案 |
 | `500` | 未预期的服务端错误 |
 
@@ -132,7 +133,9 @@
 
 ## POST `/api/pay`
 
-模拟可重放支付回调。当前只接受 `pulse_weekly`，成功后将当前 session 的订阅状态设为 `active`，重复调用不会创建第二条订阅记录。
+创建一笔 `wechat_mock` 待支付订单，不会立即解锁订阅。服务端返回一个携带一次性 `checkoutToken` 的扫码地址；该 token 是模拟付款方进入收银台的能力凭证，不会在桌面端订单状态接口中返回。
+
+这是演示支付，不会调用微信、银行卡或真实转账接口。
 
 请求体：
 
@@ -145,28 +148,62 @@
 ```json
 {
   "payment": {
-    "status": "confirmed",
-    "provider": "pulse_demo",
-    "plan": "pulse_weekly"
-  },
-  "result": {
-    "sessionId": "session-uuid",
-    "access": "full",
-    "subscriptionStatus": "active",
-    "summary": {},
-    "details": {
-      "targetWeightKg": 68,
-      "curve": [],
-      "checkpoints": [],
-      "actionPlan": [],
-      "phasePlan": [],
-      "adjustmentGuide": []
-    }
+    "id": "order-uuid",
+    "orderNo": "PULSE-ABC123DEF456",
+    "provider": "wechat_mock",
+    "plan": "pulse_weekly",
+    "amountFen": 990,
+    "status": "pending",
+    "expiresAt": "2026-09-18T10:15:00.000Z",
+    "checkoutUrl": "https://example.com/pay/mock?token=checkout-token-uuid"
   }
 }
 ```
 
-不支持的 plan 或未知字段返回 `422`；未完成测评返回 `409`；没有 Cookie 返回 `401`。
+不支持的 plan 或未知字段返回 `422`；未完成测评或已解锁的 session 返回 `409`；没有 Cookie 返回 `401`。重复创建会复用尚未过期的 pending 订单。
+
+## GET `/api/pay?orderId=<uuid>`
+
+桌面端轮询当前 session 的订单状态。必须携带创建该订单时的 `pulse_session` Cookie，响应不会包含 `checkoutToken`。
+
+```json
+{
+  "payment": {
+    "id": "order-uuid",
+    "status": "pending",
+    "amountFen": 990,
+    "expiresAt": "2026-09-18T10:15:00.000Z"
+  }
+}
+```
+
+订单超过 15 分钟会在本次读取时切换为 `expired`。订单不属于当前 session 返回 `404`。
+
+## GET `/api/pay/mock?token=<uuid>`
+
+扫码后的模拟收银台读取订单。该接口不依赖桌面端 Cookie，但只返回付款方所需的金额、状态、订单号和过期时间，不暴露 sessionId、健康结果或完整报告。
+
+## POST `/api/pay/mock`
+
+模拟付款渠道的成功回调。请求体：
+
+```json
+{ "checkoutToken": "checkout-token-uuid" }
+```
+
+成功后原子地将订单设为 `paid` 并激活该订单对应 session 的订阅；重复确认保持第一次的 `paidAt`，不会重复扣款或创建第二个订阅。二维码过期返回 `409`，未知 token 返回 `404`。
+
+```json
+{
+  "payment": {
+    "orderNo": "PULSE-ABC123DEF456",
+    "provider": "wechat_mock",
+    "amountFen": 990,
+    "status": "paid",
+    "paidAt": "2026-09-18T10:02:00.000Z"
+  }
+}
+```
 
 ## POST `/api/assessment/reset`
 

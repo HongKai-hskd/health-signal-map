@@ -38,7 +38,7 @@
 
 | 结论 | 证据 | 路径 |
 | --- | --- | --- |
-| API 流程已闭环 | D1 HTTP smoke 覆盖创建、保存、完成、预览、支付、重置 | `scripts/test-d1-http.mjs` |
+| API 流程已闭环 | D1 HTTP smoke 覆盖创建、保存、完成、预览、二维码订单、模拟回调、完整结果和重置 | `scripts/test-d1-http.mjs` |
 | 会员结果有权限边界 | Route 测试断言 preview 不含 `details/curve`，full 才含完整路线 | `tests/api-routes.test.ts` |
 | Schema 可追踪 | Drizzle schema 与 migration 同步描述关系 | `db/schema.ts`、`drizzle/0000_pulse_initial.sql` |
 | AI 复盘可审阅 | 独立文档记录建模、测试生成与被否决方案 | `docs/AI-RETROSPECTIVE.md` |

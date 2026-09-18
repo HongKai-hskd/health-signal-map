@@ -15,7 +15,7 @@
 | 服务端 BMI、热量、目标日期计算 | 已完成 | `lib/domain.ts`、`app/api/assessment/complete/route.ts` |
 | 结果持久化 | 已完成 | `health_results` 表、D1 store |
 | 非会员/会员差异化结果 | 已完成 | `app/api/results/route.ts`、`tests/api-routes.test.ts` |
-| 模拟支付回调 | 已完成 | `app/api/pay/route.ts` |
+| 模拟扫码支付与回调 | 已完成 | `payment_orders`、`app/api/pay/*`、`app/pay/mock/page.tsx` |
 | 数据校验与错误响应 | 已完成 | Zod schemas、API route tests |
 | 自动化测试与 CI | 已完成 | `tests/`、`.github/workflows/ci.yml`、[测试说明](./TESTING.md) |
 | 数据库 Schema 图 | 已完成 | [数据库 Schema](./DATABASE-SCHEMA.md) |
@@ -46,9 +46,9 @@ npm run build
 
 本次验收结果：
 
-- Vitest：19/19 通过
+- Vitest：21/21 通过
 - API route 测试：通过
-- D1 HTTP smoke：通过，覆盖创建、分步保存、完成、预览、支付、完整结果和 reset
+- D1 HTTP smoke：通过，覆盖创建、分步保存、完成、preview、二维码订单、模拟回调、full 和 reset
 - TypeScript：通过
 - ESLint：通过
 - Production build：通过
@@ -59,9 +59,10 @@ npm run build
 2. 依次提交性别、目标、运动频率、身体数据和目标日期。
 3. 调用 `POST /api/assessment/complete`，服务端计算并持久化结果。
 4. 调用 `GET /api/results`，未支付时只能得到 preview。
-5. 调用 `/api/pay`，将订阅状态改为 `active`。
-6. 再次调用 `GET /api/results`，得到完整结果。
-7. 调用 reset 创建新的测评 session，旧 session 数据保留。
+5. 调用 `POST /api/pay` 创建 15 分钟有效的待支付订单，展示本地生成的二维码。
+6. 扫码打开 `/pay/mock?token=...`，点击“确认模拟支付”；不会产生真实扣款。
+7. 模拟回调将订单设为 paid 并激活订阅，桌面端轮询后自动得到完整结果。
+8. 调用 reset 创建新的测评 session，旧 session 数据保留。
 
 `/pay` 可重放方式：
 
@@ -72,7 +73,7 @@ curl -X POST http://127.0.0.1:8787/api/pay \
   -d '{"plan":"pulse_weekly"}'
 ```
 
-完整请求体、响应体、状态码和权限边界见 [API 参考](./API.md)。
+响应中的 `payment.checkoutUrl` 是二维码载荷。演示确认可调用 `POST /api/pay/mock` 并传入该 URL 的 `token`；完整请求体、响应体、状态码和权限边界见 [API 参考](./API.md)。
 
 ## 三、接口与权限契约
 
@@ -82,7 +83,9 @@ curl -X POST http://127.0.0.1:8787/api/pay \
 | `PATCH` | `/api/assessment` | 增量保存一个步骤 | 必须有 `pulse_session` |
 | `POST` | `/api/assessment/complete` | 服务端计算并完成测评 | 必须有 Cookie，完成后不可继续写入 |
 | `GET` | `/api/results` | 获取 preview 或 full 结果 | 必须有 Cookie；订阅决定字段范围 |
-| `POST` | `/api/pay` | 模拟订阅激活 | 必须有 Cookie，重复调用幂等 |
+| `POST` | `/api/pay` | 创建模拟扫码订单 | 必须有 Cookie，返回 pending 和 checkoutUrl |
+| `GET` | `/api/pay?orderId=<uuid>` | 轮询订单状态 | 必须有 Cookie，订单必须属于当前 session |
+| `GET/POST` | `/api/pay/mock` | 读取/确认模拟收银台订单 | 使用一次性 checkout token，无需桌面 Cookie |
 | `POST` | `/api/assessment/reset` | 创建新的测评 session | 特殊例外：不要求旧 Cookie |
 | `GET` | `/api/results/export` | 导出结果 Markdown | 必须有 Cookie，并遵守订阅边界 |
 
@@ -90,7 +93,8 @@ curl -X POST http://127.0.0.1:8787/api/pay \
 
 - `400`：请求体不是合法 JSON 或缺少必要字段。
 - `401`：缺少或无效的 `pulse_session`。
-- `409`：session 已完成、重复完成或状态冲突。
+- `404`：订单、session 或扫码 token 不存在。
+- `409`：session 已完成、重复完成、二维码过期或状态冲突。
 - `422`：字段结构、枚举或数值边界不合法。
 - `200`：成功；结果接口根据订阅状态返回 preview/full。
 
@@ -98,7 +102,7 @@ curl -X POST http://127.0.0.1:8787/api/pay \
 
 ## 四、数据库交付摘要
 
-当前关系模型由五张表组成：
+当前关系模型由六张表组成：
 
 | 表 | 作用 | 关键约束 |
 | --- | --- | --- |
@@ -107,6 +111,7 @@ curl -X POST http://127.0.0.1:8787/api/pay \
 | `assessment_steps` | 分步输入事实 | `(session_id, step_key)` 唯一，支持 upsert |
 | `health_results` | 服务端计算结果和输入快照 | `session_id` 唯一 |
 | `subscriptions` | 模拟订阅状态 | `session_id` 唯一 |
+| `payment_orders` | 模拟扫码订单与回调状态 | 订单号和扫码 token 唯一 |
 
 主要设计决定：
 
@@ -114,6 +119,7 @@ curl -X POST http://127.0.0.1:8787/api/pay \
 - `current_step` 只用于快速恢复 UI，真实输入以步骤表合并结果为准。
 - 结果表保存输入快照，完成后禁止再修改步骤，避免结果与输入不一致。
 - 订阅与结果分离，由服务端根据订阅状态控制 preview/full。
+- 支付订单和订阅分离；订单必须从 pending 经模拟收银台确认到 paid，才会激活订阅。
 - BMI 同时保存整数展示值和一位小数的精确值。
 
 完整 ER 图、字段清单、约束分层和生产化扩展建议见 [数据库 Schema](./DATABASE-SCHEMA.md)。
@@ -127,7 +133,7 @@ curl -X POST http://127.0.0.1:8787/api/pay \
 | 状态一致性 | 已完成 session 拒绝后续写入，重复完成返回冲突 |
 | 鉴权 | 未登录、无效 Cookie、未支付 preview、已支付 full |
 | 数据保护 | 非会员响应不包含 `details` 和 `curve` |
-| 支付闭环 | `/pay` 激活订阅后结果由 preview 变为 full |
+| 支付闭环 | pending 订单经扫码模拟确认后，结果由 preview 变为 full |
 | D1 smoke | 真实 HTTP 路由和本地 D1 持久化链路 |
 
 测试选择、已知边界和 CI 说明见 [TESTING.md](./TESTING.md)。
@@ -152,7 +158,7 @@ curl -X POST http://127.0.0.1:8787/api/pay \
 ### 当前不属于本次范围的生产化增强
 
 - 正式账号体系和跨设备身份绑定：当前是匿名 `pulse_session`。
-- 真实支付 provider、webhook 事件表和支付幂等键：当前为模拟 `/pay`。
+- 真实支付 provider、签名验签、金额核验和 webhook 事件表：当前为不接外部资金的 `wechat_mock`。
 - 数据库级 enum/check 约束：当前主要由 Zod 和 domain service 保证。
 - 多实例下更强的乐观锁版本号：当前已避免整块 JSON 覆盖，但生产部署仍可增加 `version`/CAS。
 - 算法版本字段：当前行动计划在读取时由输入重新生成，生产报告应保存算法版本以保证历史复现。

@@ -1,6 +1,6 @@
 # pulse/08 · 健康信号地图
 
-一个中文健康测评 Funnel 的全栈实现：用户逐步填写个人目标与身体数据，服务端计算 BMI、建议摄入量和目标日期；中途刷新可恢复进度，结果页先展示脱敏预览，调用模拟支付回调后解锁完整趋势。
+一个中文健康测评 Funnel 的全栈实现：用户逐步填写个人目标与身体数据，服务端计算 BMI、建议摄入量和目标日期；中途刷新可恢复进度，结果页先展示脱敏预览，再通过“二维码下单 → 模拟收银台确认 → 回调解锁”查看完整趋势。
 
 ## 产品设计
 
@@ -27,7 +27,7 @@
 | --- | --- | --- |
 | 分步保存与中断恢复 | 已完成 | Cookie 会话、步骤表事实来源、D1 HTTP smoke |
 | 服务端健康计算 | 已完成 | BMI、能量目标、目标日期、趋势与行动路线 |
-| 订阅鉴权与差异化结果 | 已完成 | preview/full、脱敏导出、`/api/pay` 幂等解锁 |
+| 订阅鉴权与差异化结果 | 已完成 | preview/full、脱敏导出、二维码订单与幂等模拟回调 |
 | 非法输入与边界测试 | 已完成 | Zod 上下界、未知字段、非法 JSON、支付参数校验 |
 | 并发与状态一致性 | 已完成 | `Promise.all` 并发保存、完成态写保护、结果幂等 |
 | 自动化质量保障 | 已完成 | Vitest、TypeScript、lint、生产构建、D1 smoke、CI |
@@ -75,9 +75,11 @@ npm run db:local:seed
 | POST | `/api/assessment/complete` | 服务端校验完整数据并生成结果 |
 | GET | `/api/results` | 会员返回完整数据，非会员只返回 summary 和 `protected.totalWeeks/message`，不返回 `details/curve` |
 | GET | `/api/results/export` | 下载当前会话可见范围内的 Markdown 报告 |
-| POST | `/api/pay` | 校验 `plan=pulse_weekly`，模拟幂等支付回调并将订阅状态改为 active |
+| POST | `/api/pay` | 创建 15 分钟有效的 `wechat_mock` 待支付订单并返回扫码地址 |
+| GET | `/api/pay?orderId=<uuid>` | 桌面端查询当前订单状态，不返回扫码 token |
+| GET/POST | `/api/pay/mock` | 模拟收银台读取/确认一次性扫码 token；确认后订阅变为 active |
 
-接口约束：除 reset 外，没有 `pulse_session` Cookie 的写入/结果请求返回 `401`；非法步骤返回 `400`；非法 JSON 返回 `400`；PATCH 顶层或步骤数据包含未声明字段时返回 `422`；Zod 数据校验失败返回 `422`；已完成 session 不允许继续修改，返回 `409`，需要通过 reset 开始新测评。
+接口约束：除 reset 和携带扫码 token 的模拟收银台外，没有 `pulse_session` Cookie 的写入/结果请求返回 `401`；非法步骤返回 `400`；非法 JSON 返回 `400`；PATCH 顶层或步骤数据包含未声明字段时返回 `422`；Zod 数据校验失败返回 `422`；已完成 session 不允许继续修改，返回 `409`，需要通过 reset 开始新测评。
 
 ### 可重放的 `/pay` 流程
 
@@ -103,9 +105,16 @@ curl -sS -b pulse.cookies -H 'Content-Type: application/json' -X POST \
   -d '{}' "$BASE/api/assessment/complete"
 curl -sS -b pulse.cookies "$BASE/api/results"
 
-# 模拟回调后：subscriptionStatus=active，响应中出现完整 details.curve、actionPlan 和 phasePlan
+# 创建模拟支付订单：状态为 pending，响应中的 checkoutUrl 可用于生成二维码
 curl -sS -b pulse.cookies -H 'Content-Type: application/json' -X POST \
   -d '{"plan":"pulse_weekly"}' "$BASE/api/pay"
+
+# 从 checkoutUrl 中取出 token；扫码页和该 cURL 都只模拟回调，不会真实转账
+curl -sS "$BASE/api/pay/mock?token=<checkout-token>"
+curl -sS -H 'Content-Type: application/json' -X POST \
+  -d '{"checkoutToken":"<checkout-token>"}' "$BASE/api/pay/mock"
+
+# 模拟回调后：subscriptionStatus=active，响应中出现完整 details.curve、actionPlan 和 phasePlan
 curl -sS -b pulse.cookies "$BASE/api/results"
 curl -sS -b pulse.cookies -OJ "$BASE/api/results/export"
 ```
@@ -122,6 +131,7 @@ erDiagram
   assessment_sessions ||--o{ assessment_steps : records
   assessment_sessions ||--o| health_results : produces
   assessment_sessions ||--o| subscriptions : unlocks
+  assessment_sessions ||--o{ payment_orders : bills
 
   users {
     text id PK
@@ -165,11 +175,22 @@ erDiagram
     text paid_at
     text updated_at
   }
+  payment_orders {
+    text id PK
+    text session_id FK
+    text order_no UK
+    text provider
+    integer amount_fen
+    text status
+    text checkout_token UK
+    text expires_at
+    text paid_at
+  }
 ```
 
 - `assessment_steps` 以 `(session_id, step_key)` 唯一约束保存增量数据，是进度恢复和并发更新的事实来源。
 - `assessment_sessions.current_step` 只做快速展示，使用 `max(current_step, incoming_step)`，不会因乱序提交倒退。
-- `health_results` 保存服务器计算结果、输入快照和趋势 JSON，`subscriptions` 独立记录权限状态。
+- `health_results` 保存服务器计算结果、输入快照和趋势 JSON，`subscriptions` 独立记录权限状态，`payment_orders` 保留 pending/paid/expired 的支付状态机和过期时间。
 - 会员报告额外返回按第 1 周、中段和目标窗口组织的 `actionPlan`、四阶段 `phasePlan` 和 `adjustmentGuide`；导出接口严格复用当前 session 的脱敏权限，不会绕过 preview/full 限制。
 - 常用 session 查询和唯一关系都有索引；SQL migration 位于 `drizzle/0000_pulse_initial.sql`。
 
@@ -181,7 +202,7 @@ erDiagram
 npm test
 ```
 
-`npm test` 当前覆盖 19 个单元、Route 级集成场景：
+`npm test` 当前覆盖 21 个单元、Route 级集成场景：
 
 - BMI、热量、目标日期、趋势曲线的服务端计算
 - 年龄、身高、体重的上下界和极端值
@@ -201,7 +222,7 @@ npm run test:d1
 # 也可以：BASE_URL=https://your-host.example npm run test:d1
 ```
 
-它会真实调用 API，覆盖 D1 Cookie 会话、分步持久化、preview/full、重复支付、完成态写保护和 reset。并发更新由 `npm test` 中的 `Promise.all` 场景覆盖；暂未覆盖真实第三方支付签名、支付 provider 事件审计和生产 D1 网络故障，因为本题要求的是可重放的模拟回调；生产化时应为 `/api/pay` 增加 provider 签名校验和支付事件表。
+它会真实调用 API，覆盖 D1 Cookie 会话、分步持久化、pending 订单、扫码 token、模拟回调、preview/full、重复确认、完成态写保护和 reset。并发更新由 `npm test` 中的 `Promise.all` 场景覆盖；暂未覆盖真实第三方支付签名、支付 provider webhook 事件审计和生产 D1 网络故障，因为本题只提供不会扣款的模拟收银台；生产化时应验证 provider 签名、金额和订单状态，并增加 webhook 事件表。
 
 GitHub Actions 在类型检查、lint、单元/Route 测试和生产构建后，还会初始化本地 D1、启动 Worker 并执行同一套 HTTP smoke，避免 CI 只验证内存实现。
 
@@ -211,4 +232,4 @@ GitHub Actions 在类型检查、lint、单元/Route 测试和生产构建后，
 
 AI 协助拆分了实体关系、生成 Zod 边界数据、补齐测试矩阵和整理 API 文档；最终保留了“步骤表为事实来源”的模型，以避免并发保存不同步骤时读改写 `data_json` 造成丢数据。
 
-有一次 AI 生成的初版 `/api/assessment/complete` 直接返回了完整结果，其中包含趋势曲线。这个方案被否决：即使结果页随后再做脱敏，调用者仍可从 complete 接口绕过权限拿到受保护字段。现在 complete 在保存结果后只返回和 `/api/results` 相同的脱敏视图，只有 `/api/pay` 成功后才返回 `details.curve`。
+有一次 AI 生成的初版 `/api/assessment/complete` 直接返回了完整结果，其中包含趋势曲线。这个方案被否决：即使结果页随后再做脱敏，调用者仍可从 complete 接口绕过权限拿到受保护字段。现在 complete 在保存结果后只返回和 `/api/results` 相同的脱敏视图，只有模拟收银台确认订单、回调把订阅置为 active 后才返回 `details.curve`。

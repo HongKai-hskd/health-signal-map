@@ -13,7 +13,7 @@ AI 参与了以下工作：
 - 设计结果快照，让计算结果与完成时的输入保持一致。
 - 生成 Drizzle schema、SQLite migration、索引和唯一约束。
 
-最终保留的核心判断是：`assessment_steps` 是恢复进度的事实来源，`current_step` 只是 UI 快速定位字段；订阅状态独立保存，由服务端决定 preview/full 返回边界。
+最终保留的核心判断是：`assessment_steps` 是恢复进度的事实来源，`current_step` 只是 UI 快速定位字段；订阅状态独立保存，由服务端决定 preview/full 返回边界。后续又把支付订单从订阅状态中拆开，使用 `payment_orders` 记录 pending/paid/expired，避免一打开收银台就被误记为已支付。
 
 ## Mock 数据与核心逻辑
 
@@ -41,7 +41,7 @@ AI 协助把需求转换为测试矩阵，并补充了：
 - 乱序、重复和 `Promise.all` 并发保存
 - 无 Cookie、非法 JSON、未知步骤、未知字段、数组 data
 - preview/full 差异化返回，确保非会员拿不到 `details` 或 `curve`
-- `/pay` 方案校验、重复回调和支付后 `/api/results` 完整返回
+- `/api/pay` 创建 pending 订单、一次性扫码 token、过期订单、重复模拟确认和支付后 `/api/results` 完整返回
 - 已完成 session 的写保护和 reset 新会话
 - D1 Worker 的真实 HTTP smoke 流程
 
@@ -53,7 +53,7 @@ AI 协助把需求转换为测试矩阵，并补充了：
 2. 即使页面后续隐藏曲线，调用者仍然可以直接读取 HTTP 响应。
 3. 结果权限应该由服务端统一决定，而不是依赖前端展示逻辑。
 
-最终实现是：`complete` 只负责计算和持久化，然后复用结果权限逻辑返回 preview；只有 `/api/pay` 成功后，`/api/results` 和导出接口才返回 full details。
+最终实现是：`complete` 只负责计算和持久化，然后复用结果权限逻辑返回 preview；只有 `/api/pay` 创建订单、模拟收银台确认并将订单回调为 paid 后，`/api/results` 和导出接口才返回 full details。
 
 另一个被修正的点是“重新测评”只刷新页面。刷新会复用原 Cookie 和已完成 session，无法真正开始新流程，因此改为调用 `/api/assessment/reset`，生成新的 session 并保留旧结果在数据库中。
 
