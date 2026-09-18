@@ -46,7 +46,7 @@ npm run build
 
 本次验收结果：
 
-- Vitest：21/21 通过
+- Vitest：22/22 通过
 - API route 测试：通过
 - D1 HTTP smoke：通过，覆盖创建、分步保存、完成、preview、二维码订单、模拟回调、full 和 reset
 - TypeScript：通过
@@ -85,7 +85,7 @@ curl -X POST http://127.0.0.1:8787/api/pay \
 | `GET` | `/api/results` | 获取 preview 或 full 结果 | 必须有 Cookie；订阅决定字段范围 |
 | `POST` | `/api/pay` | 创建模拟扫码订单 | 必须有 Cookie，返回 pending 和 checkoutUrl |
 | `GET` | `/api/pay?orderId=<uuid>` | 轮询订单状态 | 必须有 Cookie，订单必须属于当前 session |
-| `GET/POST` | `/api/pay/mock` | 读取/确认模拟收银台订单 | 使用一次性 checkout token，无需桌面 Cookie |
+| `GET/POST` | `/api/pay/mock` | 读取/确认模拟收银台订单 | 使用短时 checkout token，无需桌面 Cookie |
 | `POST` | `/api/assessment/reset` | 创建新的测评 session | 特殊例外：不要求旧 Cookie |
 | `GET` | `/api/results/export` | 导出结果 Markdown | 必须有 Cookie，并遵守订阅边界 |
 
@@ -111,7 +111,7 @@ curl -X POST http://127.0.0.1:8787/api/pay \
 | `assessment_steps` | 分步输入事实 | `(session_id, step_key)` 唯一，支持 upsert |
 | `health_results` | 服务端计算结果和输入快照 | `session_id` 唯一 |
 | `subscriptions` | 模拟订阅状态 | `session_id` 唯一 |
-| `payment_orders` | 模拟扫码订单与回调状态 | 订单号和扫码 token 唯一 |
+| `payment_orders` | 模拟扫码订单与回调状态 | 订单号和扫码 token 唯一；同一 session 最多一个 pending |
 
 主要设计决定：
 
@@ -159,7 +159,7 @@ curl -X POST http://127.0.0.1:8787/api/pay \
 
 - 正式账号体系和跨设备身份绑定：当前是匿名 `pulse_session`。
 - 真实支付 provider、签名验签、金额核验和 webhook 事件表：当前为不接外部资金的 `wechat_mock`。
-- 数据库级 enum/check 约束：当前主要由 Zod 和 domain service 保证。
+- 更完整的数据库级 enum/check 约束：当前已有核心状态、步骤、金额和方案 CHECK；JSON 业务字段仍由 Zod 和 domain service 保证。
 - 多实例下更强的乐观锁版本号：当前已避免整块 JSON 覆盖，但生产部署仍可增加 `version`/CAS。
 - 算法版本字段：当前行动计划在读取时由输入重新生成，生产报告应保存算法版本以保证历史复现。
 

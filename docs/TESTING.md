@@ -23,12 +23,12 @@ npm run test:d1
 | --- | --- | --- |
 | Domain 单元测试 | `tests/health-assessment.test.ts` | BMI、能量目标、目标日期、趋势、四阶段路线、非法边界 |
 | Service 集成测试 | `tests/health-assessment.test.ts` | 恢复、乱序、重复、`Promise.all` 并发、完成幂等、旧会话写保护 |
-| 支付状态机测试 | `tests/payment-flow.test.ts` | pending、过期、一次性扫码 token、幂等确认、preview → full |
+| 支付状态机测试 | `tests/payment-flow.test.ts` | pending、过期、短时扫码 token、并发创建复用、幂等确认、preview → full |
 | Route 集成测试 | `tests/api-routes.test.ts` | Cookie、HTTP 状态码、非法 JSON、非法字段、支付订单、模拟收银台和 Markdown 导出 |
 | D1 HTTP smoke | `npm run test:d1` | 真实 Worker、D1 持久化、Cookie 恢复、二维码订单、模拟回调、reset 和结果权限 |
 | CI | `.github/workflows/ci.yml` | Node 22、类型检查、lint、测试、构建、D1 smoke |
 
-当前 `npm test` 共 21 个测试：15 个健康评估与服务测试、2 个支付状态机测试、4 个 API Route 测试。
+当前 `npm test` 共 22 个测试：15 个健康评估与服务测试、3 个支付状态机测试、4 个 API Route 测试。
 
 ## 关键场景矩阵
 
@@ -46,6 +46,7 @@ npm run test:d1
 | Store 层绕过 Service 写入已完成 session | `409` | `tests/health-assessment.test.ts` |
 | preview 读取趋势 | 不返回 `details/curve` | 两个测试文件 |
 | 创建支付订单 | 仅返回 pending，不解锁结果 | `tests/api-routes.test.ts`、D1 smoke |
+| 并发创建支付订单 | 同一 session 复用一笔 pending 订单 | `tests/payment-flow.test.ts`、D1 smoke |
 | 扫码模拟确认后读取结果 | 返回完整 `details` | `tests/api-routes.test.ts`、D1 smoke |
 | 重复扫码确认 | 保持首次 paid 状态，不重复创建订阅 | `tests/payment-flow.test.ts`、`tests/api-routes.test.ts` |
 | 过期二维码 | 订单变为 expired，拒绝确认且保持 preview | `tests/payment-flow.test.ts` |

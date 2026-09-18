@@ -77,7 +77,7 @@ erDiagram
 | `assessment_steps` | 保存分步输入，是恢复进度和合并数据的事实来源 | `(session_id, step_key)` 唯一 |
 | `health_results` | 保存服务端计算结果和输入快照 | 每个 session 最多一条结果 |
 | `subscriptions` | 保存模拟订阅状态和方案 | 每个 session 最多一条订阅 |
-| `payment_orders` | 保存模拟支付订单、扫码能力 token 和状态流转 | `order_no`、`checkout_token` 唯一；关联一个 session |
+| `payment_orders` | 保存模拟支付订单、扫码能力 token 和状态流转 | `order_no`、`checkout_token` 唯一；同一 session 最多一个 pending 订单 |
 
 ## 字段与约束分层
 
@@ -85,11 +85,11 @@ erDiagram
 
 | 层级 | 负责内容 | 证据 |
 | --- | --- | --- |
-| 数据库 | 主键、外键、非空、唯一索引、查询索引 | `db/schema.ts`、`drizzle/0000_pulse_initial.sql` |
+| 数据库 | 主键、外键、非空、CHECK、唯一索引、查询索引和完成态/支付状态保护 | `db/schema.ts`、`drizzle/0000_pulse_initial.sql` |
 | API / Domain | step 字段形状、枚举、数值上下界、目标体重关系、结果访问权限 | `lib/domain.ts`、`app/api/*/route.ts` |
 | Service | session 生命周期、完成态写保护、结果幂等、订单过期、模拟回调和订阅激活 | `lib/assessment-service.ts`、`lib/payment-service.ts` |
 
-`assessment_steps.payload_json` 和 `health_results.input_json/curve_json` 是 JSON 文本列，JSON 内部字段由 Zod 在写入前校验；数据库本身不负责解析这些业务 JSON。
+`assessment_steps.payload_json` 和 `health_results.input_json/curve_json` 是 JSON 文本列，JSON 内部字段由 Zod 在写入前校验；数据库负责主键、外键、CHECK、唯一索引和支付状态保护，不负责解析这些业务 JSON。
 
 当前匿名模式以 `pulse_session` 作为访问边界。创建或 reset 一次测评会创建一个新的 `users` 行和 `assessment_sessions` 行，旧 session 保留用于历史结果，但不会被新 Cookie 复用；这符合挑战要求的简易 Session 识别，不等同于正式账号体系。
 
@@ -103,9 +103,11 @@ erDiagram
 
 6. `payment_orders` 和 `subscriptions` 分开：订单可处于 `pending`、`paid` 或 `expired`，订阅只表达最终访问权限。这样可保留过期/重复确认的历史，不会把“用户打开了收银台”误记为已订阅。
 
-7. `checkout_token` 是随机 UUID，仅出现在二维码对应的模拟收银台 URL；桌面端按 session 查询订单时不会返回 token。token 过期后订单不能再确认，重复确认保持首次 `paid_at`。
+7. `checkout_token` 是随机 UUID，仅出现在二维码对应的模拟收银台 URL；桌面端按 session 查询订单时不会返回 token。token 过期后订单不能再确认，重复确认保持首次 `paid_at`；同一 session 的 pending 订单由唯一索引防止并发重复创建。
 
-8. `health_results` 持久化计算所需的输入快照和核心结果；行动计划、阶段路线和状态调整规则由同一输入在读取时生成，因此生产化时应增加算法版本字段，保证历史报告可复现。
+8. `assessment_steps` 有触发器保护 completed session，避免完成和旧写入请求竞态时重新写入步骤；支付订单确认先进行带状态和过期时间条件的更新，再激活订阅。
+
+9. `health_results` 持久化计算所需的输入快照和核心结果；行动计划、阶段路线和状态调整规则由同一输入在读取时生成，因此生产化时应增加算法版本字段，保证历史报告可复现。
 
 ## 源码与验证路径
 

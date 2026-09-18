@@ -41,7 +41,7 @@ AI 协助把需求转换为测试矩阵，并补充了：
 - 乱序、重复和 `Promise.all` 并发保存
 - 无 Cookie、非法 JSON、未知步骤、未知字段、数组 data
 - preview/full 差异化返回，确保非会员拿不到 `details` 或 `curve`
-- `/api/pay` 创建 pending 订单、一次性扫码 token、过期订单、重复模拟确认和支付后 `/api/results` 完整返回
+- `/api/pay` 创建 pending 订单、短时扫码 token、并发订单复用、过期订单、重复模拟确认和支付后 `/api/results` 完整返回
 - 已完成 session 的写保护和 reset 新会话
 - D1 Worker 的真实 HTTP smoke 流程
 
