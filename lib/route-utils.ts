@@ -1,11 +1,16 @@
 import { z } from "zod";
 import { AssessmentError, AssessmentService } from "./assessment-service";
 import { D1AssessmentStore } from "./d1-store";
+import { MockPaymentService } from "./payment-service";
 
 export const SESSION_COOKIE = "pulse_session";
 
 export function assessmentService() {
   return new AssessmentService(new D1AssessmentStore());
+}
+
+export function paymentService() {
+  return new MockPaymentService(new D1AssessmentStore());
 }
 
 export function readSessionId(request: Request) {

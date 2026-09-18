@@ -100,17 +100,41 @@ try {
     body: { plan: "invalid_plan" },
     expected: 422,
   });
-  const paid = await request("/api/pay", {
+  const checkout = await request("/api/pay", {
     method: "POST",
     body: { plan: "pulse_weekly" },
     expected: 200,
   });
-  assert(paid.payload.result.access === "full", "pay should unlock full access");
-  assert(paid.payload.result.details?.curve?.length > 1, "full results should include the curve");
+  assert(checkout.payload.payment.status === "pending", "pay should create a pending checkout");
+  assert(checkout.payload.payment.amountFen === 990, "checkout should preserve the expected amount");
+  const checkoutToken = new URL(checkout.payload.payment.checkoutUrl).searchParams.get("token");
+  assert(checkoutToken, "checkout should return a payer token in the QR URL");
 
-  await request("/api/pay", {
+  const desktopStatus = await request(`/api/pay?orderId=${checkout.payload.payment.id}`, { expected: 200 });
+  assert(desktopStatus.payload.payment.status === "pending", "desktop should observe the pending order");
+
+  const payerStatus = await request(`/api/pay/mock?token=${checkoutToken}`, {
+    useCookie: false,
+    expected: 200,
+  });
+  assert(payerStatus.payload.payment.status === "pending", "payer should observe the pending order");
+
+  const paid = await request("/api/pay/mock", {
     method: "POST",
-    body: { plan: "pulse_weekly" },
+    body: { checkoutToken },
+    useCookie: false,
+    expected: 200,
+  });
+  assert(paid.payload.payment.status === "paid", "mock callback should confirm the payment");
+
+  const fullResult = await request("/api/results", { expected: 200 });
+  assert(fullResult.payload.access === "full", "paid checkout should unlock full access");
+  assert(fullResult.payload.details?.curve?.length > 1, "full results should include the curve");
+
+  await request("/api/pay/mock", {
+    method: "POST",
+    body: { checkoutToken },
+    useCookie: false,
     expected: 200,
   });
   await request("/api/assessment", {

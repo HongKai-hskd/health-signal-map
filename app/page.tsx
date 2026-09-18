@@ -24,6 +24,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { WebMcpBridge } from "./webmcp-bridge";
+import { PaymentCheckout, type CheckoutPayment } from "./payment-checkout";
 import type { HealthInput, PublicHealthResult } from "../lib/domain";
 import type { SessionSnapshot } from "../lib/assessment-service";
 
@@ -126,6 +127,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [paying, setPaying] = useState(false);
+  const [checkout, setCheckout] = useState<CheckoutPayment | null>(null);
   const [exporting, setExporting] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -136,12 +138,13 @@ export default function Home() {
   const choose = async (step: string, data: Record<string, unknown>) => { const saved = await saveStep(step, data); if (saved) setStepIndex((current) => Math.min(current + 1, STEP_COUNT - 1)); };
   const goNext = async () => { if (stepIndex === 3) { if (!form.age || !form.heightCm || !form.weightKg) return setError("请填写年龄、身高和当前体重后继续。"); if (form.age < 16 || form.age > 90 || form.heightCm < 120 || form.heightCm > 230 || form.weightKg < 35 || form.weightKg > 250) return setError("请使用每个输入框标注范围内的数值。"); if (await saveStep("body", { age: form.age, heightCm: form.heightCm, weightKg: form.weightKg })) setStepIndex(4); return; } if (stepIndex === 4) { if (!form.targetWeightKg) return setError("请填写目标体重后继续。"); if (form.targetWeightKg < 35 || form.targetWeightKg > 250) return setError("目标体重需要在 35–250 kg 之间。"); if (form.weightKg && (form.targetWeightKg < form.weightKg * 0.55 || form.targetWeightKg > form.weightKg * 1.3)) return setError("目标体重需要处在当前体重的合理范围内。"); if (form.goal === "feel_lighter" && form.weightKg && form.targetWeightKg >= form.weightKg) return setError("如果目标是更轻盈，目标体重需要低于当前体重。"); if (await saveStep("target", { targetWeightKg: form.targetWeightKg })) setStepIndex(5); } };
   const complete = async () => { setSaving(true); setError(null); try { const payload = await api<{ result: PublicHealthResult }>("/api/assessment/complete", { method: "POST" }); setResult(payload.result); setScreen("results"); } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "请先补全缺少的信息。"); } finally { setSaving(false); } };
-  const pay = async () => { setPaying(true); setError(null); try { const payload = await api<{ result: PublicHealthResult }>("/api/pay", { method: "POST", body: JSON.stringify({ plan: "pulse_weekly" }) }); setResult(payload.result); } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "演示支付没有完成，请再试一次。"); } finally { setPaying(false); } };
+  const pay = async () => { setPaying(true); setError(null); try { const payload = await api<{ payment: CheckoutPayment }>("/api/pay", { method: "POST", body: JSON.stringify({ plan: "pulse_weekly" }) }); setCheckout(payload.payment); } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "模拟支付暂时无法发起，请再试一次。"); } finally { setPaying(false); } };
+  const refreshPaidResult = async () => { const resultPayload = await api<PublicHealthResult>("/api/results"); setResult(resultPayload); setCheckout(null); };
   const exportReport = async () => { setExporting(true); setError(null); try { const response = await fetch("/api/results/export", { credentials: "same-origin" }); if (!response.ok) { const payload = await response.json().catch(() => null) as { error?: string } | null; throw new Error(payload?.error ?? "报告暂时无法导出。"); } const blob = await response.blob(); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "pulse-08-health-report.md"; document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url); } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "报告暂时无法导出。"); } finally { setExporting(false); } };
   const restart = async () => { if (restarting) return; setRestarting(true); setError(null); try { const payload = await api<ApiSessionResponse>("/api/assessment/reset", { method: "POST" }); setSession(payload.session); setForm(payload.session.data); setStepIndex(0); setResult(null); setScreen("assessment"); } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "暂时无法开始新的测评，请再试一次。"); } finally { setRestarting(false); } };
 
   if (loading) return <main className="loading-screen"><span className="brand-mark"><HeartPulse size={20} /></span><span>正在校准你的专属会话…</span></main>;
-  if (screen === "results" && result) return <><ResultsView result={result} paying={paying} onPay={pay} onRestart={() => { if (!restarting) void restart(); }} /><ReportExtras result={result} exporting={exporting} onExport={() => void exportReport()} />{error ? <p className="error-message results-error" role="alert">{error}</p> : null}</>;
+  if (screen === "results" && result) return <><ResultsView result={result} paying={paying} onPay={pay} onRestart={() => { if (!restarting) void restart(); }} /><ReportExtras result={result} exporting={exporting} onExport={() => void exportReport()} />{checkout ? <PaymentCheckout payment={checkout} onClose={() => setCheckout(null)} onPaid={refreshPaidResult} /> : null}{error ? <p className="error-message results-error" role="alert">{error}</p> : null}</>;
   if (!session) return <main className="loading-screen"><span>{error ?? "暂时无法开始测评。"}</span></main>;
 
   const choiceStep = (content: ReactNode, eyebrow: string, title: string, description: string) => <><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="step-description">{description}</p><div className="choice-list">{content}</div></>;

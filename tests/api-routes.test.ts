@@ -3,8 +3,12 @@ import {
   AssessmentService,
   InMemoryAssessmentStore,
 } from "../lib/assessment-service";
+import { MockPaymentService } from "../lib/payment-service";
 
-const routeState = vi.hoisted(() => ({ service: null as AssessmentService | null }));
+const routeState = vi.hoisted(() => ({
+  service: null as AssessmentService | null,
+  payments: null as MockPaymentService | null,
+}));
 
 vi.mock("../lib/route-utils", async () => {
   const { AssessmentError } = await vi.importActual<typeof import("../lib/assessment-service")>("../lib/assessment-service");
@@ -13,6 +17,10 @@ vi.mock("../lib/route-utils", async () => {
     assessmentService: () => {
       if (!routeState.service) throw new Error("测试服务尚未初始化。");
       return routeState.service;
+    },
+    paymentService: () => {
+      if (!routeState.payments) throw new Error("测试支付服务尚未初始化。");
+      return routeState.payments;
     },
     readSessionId: (request: Request) => {
       const match = (request.headers.get("cookie") ?? "").match(/(?:^|;\s*)pulse_session=([a-f0-9-]{20,})/i);
@@ -47,7 +55,10 @@ let complete: RouteHandler;
 let reset: RouteHandler;
 let results: RouteHandler;
 let exportResults: RouteHandler;
-let pay: RouteHandler;
+let payGet: RouteHandler;
+let payPost: RouteHandler;
+let mockPayGet: RouteHandler;
+let mockPayPost: RouteHandler;
 
 beforeAll(async () => {
   ({ GET: assessmentGet, PATCH: assessmentPatch } = await import("../app/api/assessment/route"));
@@ -55,7 +66,8 @@ beforeAll(async () => {
   ({ POST: reset } = await import("../app/api/assessment/reset/route"));
   ({ GET: results } = await import("../app/api/results/route"));
   ({ GET: exportResults } = await import("../app/api/results/export/route"));
-  ({ POST: pay } = await import("../app/api/pay/route"));
+  ({ GET: payGet, POST: payPost } = await import("../app/api/pay/route"));
+  ({ GET: mockPayGet, POST: mockPayPost } = await import("../app/api/pay/mock/route"));
 });
 
 function request(
@@ -89,7 +101,9 @@ async function saveStep(cookie: string, step: string, data: Record<string, unkno
 
 describe("assessment API routes", () => {
   beforeEach(() => {
-    routeState.service = new AssessmentService(new InMemoryAssessmentStore());
+    const store = new InMemoryAssessmentStore();
+    routeState.service = new AssessmentService(store);
+    routeState.payments = new MockPaymentService(store);
   });
 
   it("creates and resumes a cookie-bound session", async () => {
@@ -178,28 +192,48 @@ describe("assessment API routes", () => {
     const completedWrite = await saveStep(cookie, "body", { age: 33, heightCm: 168, weightKg: 75 });
     expect(completedWrite.status).toBe(409);
 
-    const invalidPlan = await pay(request("/api/pay", { method: "POST", cookie, body: { plan: "not-a-plan" } }));
+    const invalidPlan = await payPost(request("/api/pay", { method: "POST", cookie, body: { plan: "not-a-plan" } }));
     expect(invalidPlan.status).toBe(422);
 
-    const missingPlan = await pay(request("/api/pay", { method: "POST", cookie, body: {} }));
+    const missingPlan = await payPost(request("/api/pay", { method: "POST", cookie, body: {} }));
     expect(missingPlan.status).toBe(422);
 
-    const unknownPaymentField = await pay(request("/api/pay", {
+    const unknownPaymentField = await payPost(request("/api/pay", {
       method: "POST",
       cookie,
       body: { plan: "pulse_weekly", debug: true },
     }));
     expect(unknownPaymentField.status).toBe(422);
 
-    const paid = await pay(request("/api/pay", { method: "POST", cookie, body: { plan: "pulse_weekly" } }));
-    expect(paid.status).toBe(200);
-    const full = await readJson<{ payment: { plan: string }; result: { access: string; details?: { curve: unknown[]; actionPlan: unknown[]; phasePlan: unknown[]; adjustmentGuide: unknown[] } } }>(paid);
-    expect(full.payment.plan).toBe("pulse_weekly");
-    expect(full.result.access).toBe("full");
-    expect(full.result.details?.curve.length).toBeGreaterThan(1);
-    expect(full.result.details?.actionPlan.length).toBe(3);
-    expect(full.result.details?.phasePlan.length).toBe(4);
-    expect(full.result.details?.adjustmentGuide.length).toBe(3);
+    const checkoutResponse = await payPost(request("/api/pay", { method: "POST", cookie, body: { plan: "pulse_weekly" } }));
+    expect(checkoutResponse.status).toBe(200);
+    const checkout = await readJson<{ payment: { id: string; status: string; amountFen: number; checkoutUrl: string } }>(checkoutResponse);
+    expect(checkout.payment.status).toBe("pending");
+    expect(checkout.payment.amountFen).toBe(990);
+    expect(checkout.payment.checkoutUrl).toContain("/pay/mock?token=");
+    expect(checkout.payment).not.toHaveProperty("checkoutToken");
+
+    const desktopStatus = await payGet(request(`/api/pay?orderId=${checkout.payment.id}`, { cookie }));
+    expect(desktopStatus.status).toBe(200);
+    expect((await readJson<{ payment: { status: string } }>(desktopStatus)).payment.status).toBe("pending");
+
+    const outsider = await assessmentGet(request("/api/assessment"));
+    const outsiderCookie = cookieFrom(outsider);
+    const outsiderStatus = await payGet(request(`/api/pay?orderId=${checkout.payment.id}`, { cookie: outsiderCookie }));
+    expect(outsiderStatus.status).toBe(404);
+
+    const checkoutToken = new URL(checkout.payment.checkoutUrl).searchParams.get("token");
+    expect(checkoutToken).toBeTruthy();
+    const payerStatus = await mockPayGet(request(`/api/pay/mock?token=${checkoutToken}`, { cookie: undefined }));
+    expect(payerStatus.status).toBe(200);
+    expect((await readJson<{ payment: { status: string; amountFen: number } }>(payerStatus)).payment).toMatchObject({ status: "pending", amountFen: 990 });
+
+    const confirmed = await mockPayPost(request("/api/pay/mock", {
+      method: "POST",
+      body: { checkoutToken },
+    }));
+    expect(confirmed.status).toBe(200);
+    expect((await readJson<{ payment: { status: string } }>(confirmed)).payment.status).toBe("paid");
 
     const fullResults = await results(request("/api/results", { cookie }));
     expect(fullResults.status).toBe(200);
@@ -207,9 +241,12 @@ describe("assessment API routes", () => {
     expect(fullResultsPayload.access).toBe("full");
     expect(fullResultsPayload.details?.curve.length).toBeGreaterThan(1);
 
-    const repeatedPay = await pay(request("/api/pay", { method: "POST", cookie, body: { plan: "pulse_weekly" } }));
+    const repeatedPay = await mockPayPost(request("/api/pay/mock", {
+      method: "POST",
+      body: { checkoutToken },
+    }));
     expect(repeatedPay.status).toBe(200);
-    expect((await readJson<{ result: { access: string } }>(repeatedPay)).result.access).toBe("full");
+    expect((await readJson<{ payment: { status: string } }>(repeatedPay)).payment.status).toBe("paid");
 
     const exported = await exportResults(request("/api/results/export", { cookie }));
     expect(exported.status).toBe(200);
