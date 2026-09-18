@@ -9,6 +9,7 @@ import {
   InMemoryAssessmentStore,
   type SessionSnapshot,
 } from "../lib/assessment-service";
+import { MockPaymentService } from "../lib/payment-service";
 
 const validInput: HealthInput = {
   gender: "woman",
@@ -124,7 +125,7 @@ describe("assessment persistence and access", () => {
   });
 
   it("changes the result from preview to full after the payment callback", async () => {
-    const { service, session } = await setup();
+    const { store, service, session } = await setup();
     await service.saveStep(session.id, "identity", { gender: validInput.gender });
     await service.saveStep(session.id, "goal", { goal: validInput.goal });
     await service.saveStep(session.id, "activity", { activityLevel: validInput.activityLevel, exerciseDays: validInput.exerciseDays });
@@ -132,7 +133,10 @@ describe("assessment persistence and access", () => {
     await service.saveStep(session.id, "target", { targetWeightKg: validInput.targetWeightKg });
     await service.complete(session.id);
 
-    const paid = await service.pay(session.id);
+    const payments = new MockPaymentService(store);
+    const checkout = await payments.createCheckout(session.id);
+    await payments.confirmCheckout(checkout.checkoutToken);
+    const paid = await service.getResults(session.id);
     expect(paid.access).toBe("full");
     expect(paid.subscriptionStatus).toBe("active");
     expect(paid.details?.curve.length).toBeGreaterThan(1);

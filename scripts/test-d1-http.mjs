@@ -100,11 +100,20 @@ try {
     body: { plan: "invalid_plan" },
     expected: 422,
   });
-  const checkout = await request("/api/pay", {
-    method: "POST",
-    body: { plan: "pulse_weekly" },
-    expected: 200,
-  });
+  const [checkoutOne, checkoutTwo] = await Promise.all([
+    request("/api/pay", {
+      method: "POST",
+      body: { plan: "pulse_weekly" },
+      expected: 200,
+    }),
+    request("/api/pay", {
+      method: "POST",
+      body: { plan: "pulse_weekly" },
+      expected: 200,
+    }),
+  ]);
+  assert(checkoutOne.payload.payment.id === checkoutTwo.payload.payment.id, "racing checkouts should reuse one pending order");
+  const checkout = checkoutOne;
   assert(checkout.payload.payment.status === "pending", "pay should create a pending checkout");
   assert(checkout.payload.payment.amountFen === 990, "checkout should preserve the expected amount");
   const checkoutToken = new URL(checkout.payload.payment.checkoutUrl).searchParams.get("token");

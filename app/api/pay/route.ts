@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     const sessionId = readSessionId(request);
     if (!sessionId) return Response.json({ error: "需要有效的测评会话。" }, { status: 401 });
     const payload = paymentPayloadSchema.parse(await readJson(request));
-    const checkout = await paymentService().createCheckout(sessionId);
+    const checkout = await paymentService().createCheckout(sessionId, new Date(), payload.plan);
     const checkoutUrl = new URL("/pay/mock", request.url);
     checkoutUrl.searchParams.set("token", checkout.checkoutToken);
     return Response.json(

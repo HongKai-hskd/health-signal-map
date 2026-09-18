@@ -7,7 +7,13 @@ export const PAYMENT_PLAN = "pulse_weekly" as const;
 export const PAYMENT_AMOUNT_FEN = 990;
 export const PAYMENT_CHECKOUT_TTL_MS = 15 * 60 * 1000;
 
-export type PaymentPlan = typeof PAYMENT_PLAN;
+export const PAYMENT_PLANS = {
+  pulse_weekly: {
+    amountFen: PAYMENT_AMOUNT_FEN,
+  },
+} as const;
+
+export type PaymentPlan = keyof typeof PAYMENT_PLANS;
 export type PaymentOrderStatus = "pending" | "paid" | "expired";
 
 export type PaymentOrder = {
@@ -40,9 +46,13 @@ export type PaymentOrderStore = {
   confirmPaymentOrder(orderId: string, paidAt: string): Promise<PaymentOrder | null>;
 };
 
+export function isPaymentPlan(value: string): value is PaymentPlan {
+  return value in PAYMENT_PLANS;
+}
+
 type MockPaymentStore = Pick<
   AssessmentStore,
-  "getResult" | "getSubscriptionStatus" | "activateSubscription"
+  "getResult" | "getSubscriptionStatus"
 > & PaymentOrderStore;
 
 export function toPublicPaymentOrder(order: PaymentOrder): PublicPaymentOrder {
@@ -68,7 +78,11 @@ export function toPayerPaymentOrder(order: PaymentOrder): PayerPaymentOrder {
 export class MockPaymentService {
   constructor(private readonly store: MockPaymentStore) {}
 
-  async createCheckout(sessionId: string, now = new Date()): Promise<PaymentOrder> {
+  async createCheckout(
+    sessionId: string,
+    now = new Date(),
+    planCode: PaymentPlan = PAYMENT_PLAN,
+  ): Promise<PaymentOrder> {
     const result = await this.store.getResult(sessionId);
     if (!result) throw new AssessmentError("请先完成测评，再创建支付订单。", 409);
 
@@ -83,21 +97,30 @@ export class MockPaymentService {
       if (normalized.status === "pending") return normalized;
     }
 
+    const plan = PAYMENT_PLANS[planCode];
     const createdAt = now.toISOString();
-    return this.store.createPaymentOrder({
-      id: crypto.randomUUID(),
-      sessionId,
-      orderNo: `PULSE-${crypto.randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`,
-      provider: "wechat_mock",
-      plan: PAYMENT_PLAN,
-      amountFen: PAYMENT_AMOUNT_FEN,
-      status: "pending",
-      checkoutToken: crypto.randomUUID(),
-      expiresAt: new Date(now.getTime() + PAYMENT_CHECKOUT_TTL_MS).toISOString(),
-      paidAt: null,
-      createdAt,
-      updatedAt: createdAt,
-    });
+    try {
+      return await this.store.createPaymentOrder({
+        id: crypto.randomUUID(),
+        sessionId,
+        orderNo: `PULSE-${crypto.randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`,
+        provider: "wechat_mock",
+        plan: planCode,
+        amountFen: plan.amountFen,
+        status: "pending",
+        checkoutToken: crypto.randomUUID(),
+        expiresAt: new Date(now.getTime() + PAYMENT_CHECKOUT_TTL_MS).toISOString(),
+        paidAt: null,
+        createdAt,
+        updatedAt: createdAt,
+      });
+    } catch (error) {
+      // The database also enforces one pending order per session. If two
+      // requests race, return the winner instead of leaking a 500.
+      const raced = await this.store.getLatestPendingPaymentOrder(sessionId);
+      if (raced) return this.normalizeStatus(raced, now);
+      throw error;
+    }
   }
 
   async getCheckout(sessionId: string, orderId: string, now = new Date()) {
@@ -120,10 +143,12 @@ export class MockPaymentService {
     if (normalized.status === "expired") {
       throw new AssessmentError("该模拟支付二维码已过期，请回到桌面端重新生成。", 409);
     }
-    if (normalized.status === "paid") return normalized;
 
     const confirmed = await this.store.confirmPaymentOrder(normalized.id, now.toISOString());
     if (!confirmed) throw new AssessmentError("支付订单不存在。", 404);
+    if (confirmed.status !== "paid") {
+      throw new AssessmentError("该模拟支付二维码已过期，请回到桌面端重新生成。", 409);
+    }
     return confirmed;
   }
 

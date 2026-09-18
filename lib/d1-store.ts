@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import {
   assessmentSessions,
@@ -28,6 +28,7 @@ import type {
   PaymentOrder,
   PaymentOrderStore,
 } from "./payment-service";
+import { isPaymentPlan } from "./payment-service";
 
 export class D1AssessmentStore implements AssessmentStore, PaymentOrderStore {
   private readonly db = getDb();
@@ -99,22 +100,30 @@ export class D1AssessmentStore implements AssessmentStore, PaymentOrderStore {
       throw new AssessmentError("这份测评已经完成，请重新开始新的测评。", 409);
     }
 
-    await this.db.batch([
-      this.db
-        .insert(assessmentSteps)
-        .values({ sessionId, stepKey: step, payloadJson: JSON.stringify(data), updatedAt: now })
-        .onConflictDoUpdate({
-          target: [assessmentSteps.sessionId, assessmentSteps.stepKey],
-          set: { payloadJson: JSON.stringify(data), updatedAt: now },
-        }),
-      this.db
-        .update(assessmentSessions)
-        .set({
-          currentStep: sql`max(${assessmentSessions.currentStep}, ${stepIndex})`,
-          updatedAt: now,
-        })
-        .where(eq(assessmentSessions.id, sessionId)),
-    ]);
+    try {
+      await this.db.batch([
+        this.db
+          .insert(assessmentSteps)
+          .values({ sessionId, stepKey: step, payloadJson: JSON.stringify(data), updatedAt: now })
+          .onConflictDoUpdate({
+            target: [assessmentSteps.sessionId, assessmentSteps.stepKey],
+            set: { payloadJson: JSON.stringify(data), updatedAt: now },
+          }),
+        this.db
+          .update(assessmentSessions)
+          .set({
+            currentStep: sql`max(${assessmentSessions.currentStep}, ${stepIndex})`,
+            updatedAt: now,
+          })
+          .where(eq(assessmentSessions.id, sessionId)),
+      ]);
+    } catch (error) {
+      const current = await this.getSession(sessionId);
+      if (current?.status === "completed") {
+        throw new AssessmentError("这份测评已经完成，请重新开始新的测评。", 409);
+      }
+      throw error;
+    }
     return (await this.getSession(sessionId))!;
   }
 
@@ -197,14 +206,14 @@ export class D1AssessmentStore implements AssessmentStore, PaymentOrderStore {
     return (row?.status as SubscriptionStatus | undefined) ?? "inactive";
   }
 
-  async activateSubscription(sessionId: string) {
+  private async ensureSubscription(sessionId: string, paidAt: string) {
     const now = new Date().toISOString();
     await this.db
       .insert(subscriptions)
-      .values({ sessionId, status: "active", paidAt: now, updatedAt: now })
+      .values({ sessionId, status: "active", paidAt, updatedAt: now })
       .onConflictDoUpdate({
         target: subscriptions.sessionId,
-        set: { status: "active", paidAt: now, updatedAt: now },
+        set: { status: "active", paidAt, updatedAt: now },
       });
   }
 
@@ -266,21 +275,22 @@ export class D1AssessmentStore implements AssessmentStore, PaymentOrderStore {
     const order = await this.getPaymentOrderById(orderId);
     if (!order) return null;
     if (order.status === "pending") {
-      await this.db.batch([
-        this.db
-          .update(paymentOrders)
-          .set({ status: "paid", paidAt, updatedAt: paidAt })
-          .where(and(eq(paymentOrders.id, orderId), eq(paymentOrders.status, "pending"))),
-        this.db
-          .insert(subscriptions)
-          .values({ sessionId: order.sessionId, status: "active", paidAt, updatedAt: paidAt })
-          .onConflictDoUpdate({
-            target: subscriptions.sessionId,
-            set: { status: "active", paidAt, updatedAt: paidAt },
-          }),
-      ]);
+      const [updated] = await this.db
+        .update(paymentOrders)
+        .set({ status: "paid", paidAt, updatedAt: paidAt })
+        .where(
+          and(
+            eq(paymentOrders.id, orderId),
+            eq(paymentOrders.status, "pending"),
+            gt(paymentOrders.expiresAt, paidAt),
+          ),
+        )
+        .returning({ id: paymentOrders.id, sessionId: paymentOrders.sessionId });
+      if (updated) await this.ensureSubscription(updated.sessionId, paidAt);
     }
-    return this.getPaymentOrderById(orderId);
+    const latest = await this.getPaymentOrderById(orderId);
+    if (latest?.status === "paid") await this.ensureSubscription(latest.sessionId, latest.paidAt ?? paidAt);
+    return latest;
   }
 
   private async getPaymentOrderById(orderId: string) {
@@ -293,12 +303,15 @@ export class D1AssessmentStore implements AssessmentStore, PaymentOrderStore {
   }
 
   private toPaymentOrder(row: typeof paymentOrders.$inferSelect): PaymentOrder {
+    if (row.provider !== "wechat_mock" || !isPaymentPlan(row.planCode)) {
+      throw new AssessmentError("支付订单包含无法识别的方案。", 500);
+    }
     return {
       id: row.id,
       sessionId: row.sessionId,
       orderNo: row.orderNo,
-      provider: "wechat_mock",
-      plan: "pulse_weekly",
+      provider: row.provider,
+      plan: row.planCode,
       amountFen: row.amountFen,
       status: row.status as PaymentOrder["status"],
       checkoutToken: row.checkoutToken,

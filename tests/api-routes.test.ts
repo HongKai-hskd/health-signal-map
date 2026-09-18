@@ -217,6 +217,18 @@ describe("assessment API routes", () => {
     expect(desktopStatus.status).toBe(200);
     expect((await readJson<{ payment: { status: string } }>(desktopStatus)).payment.status).toBe("pending");
 
+    const missingOrder = await payGet(request(`/api/pay?orderId=00000000-0000-4000-8000-000000000000`, { cookie }));
+    expect(missingOrder.status).toBe(404);
+
+    const [reusedOne, reusedTwo] = await Promise.all([
+      payPost(request("/api/pay", { method: "POST", cookie, body: { plan: "pulse_weekly" } })),
+      payPost(request("/api/pay", { method: "POST", cookie, body: { plan: "pulse_weekly" } })),
+    ]);
+    expect(reusedOne.status).toBe(200);
+    expect(reusedTwo.status).toBe(200);
+    expect((await readJson<{ payment: { id: string } }>(reusedOne)).payment.id).toBe(checkout.payment.id);
+    expect((await readJson<{ payment: { id: string } }>(reusedTwo)).payment.id).toBe(checkout.payment.id);
+
     const outsider = await assessmentGet(request("/api/assessment"));
     const outsiderCookie = cookieFrom(outsider);
     const outsiderStatus = await payGet(request(`/api/pay?orderId=${checkout.payment.id}`, { cookie: outsiderCookie }));
@@ -224,6 +236,7 @@ describe("assessment API routes", () => {
 
     const checkoutToken = new URL(checkout.payment.checkoutUrl).searchParams.get("token");
     expect(checkoutToken).toBeTruthy();
+    expect((await mockPayGet(request("/api/pay/mock?token=not-a-token"))).status).toBe(422);
     const payerStatus = await mockPayGet(request(`/api/pay/mock?token=${checkoutToken}`, { cookie: undefined }));
     expect(payerStatus.status).toBe(200);
     expect((await readJson<{ payment: { status: string; amountFen: number } }>(payerStatus)).payment).toMatchObject({ status: "pending", amountFen: 990 });

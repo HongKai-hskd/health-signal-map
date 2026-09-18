@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  check,
   index,
   integer,
   sqliteTable,
@@ -31,7 +32,17 @@ export const assessmentSessions = sqliteTable(
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
-  (table) => [index("idx_assessment_sessions_user_id").on(table.userId)],
+  (table) => [
+    index("idx_assessment_sessions_user_id").on(table.userId),
+    check(
+      "chk_assessment_sessions_status",
+      sql`${table.status} IN ('in_progress', 'completed')`,
+    ),
+    check(
+      "chk_assessment_sessions_current_step",
+      sql`${table.currentStep} BETWEEN 0 AND 5`,
+    ),
+  ],
 );
 
 export const assessmentSteps = sqliteTable(
@@ -51,6 +62,10 @@ export const assessmentSteps = sqliteTable(
       table.stepKey,
     ),
     index("idx_assessment_steps_session_id").on(table.sessionId),
+    check(
+      "chk_assessment_steps_step_key",
+      sql`${table.stepKey} IN ('identity', 'goal', 'activity', 'body', 'target')`,
+    ),
   ],
 );
 
@@ -72,7 +87,15 @@ export const healthResults = sqliteTable(
     inputJson: text("input_json").notNull(),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
-  (table) => [uniqueIndex("uq_health_results_session_id").on(table.sessionId)],
+  (table) => [
+    uniqueIndex("uq_health_results_session_id").on(table.sessionId),
+    check(
+      "chk_health_results_bmi_category",
+      sql`${table.bmiCategory} IN ('low', 'balanced', 'high')`,
+    ),
+    check("chk_health_results_calorie_target", sql`${table.calorieTarget} > 0`),
+    check("chk_health_results_score", sql`${table.score} BETWEEN 0 AND 100`),
+  ],
 );
 
 export const subscriptions = sqliteTable(
@@ -89,7 +112,14 @@ export const subscriptions = sqliteTable(
     paidAt: text("paid_at"),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
-  (table) => [uniqueIndex("uq_subscriptions_session_id").on(table.sessionId)],
+  (table) => [
+    uniqueIndex("uq_subscriptions_session_id").on(table.sessionId),
+    check(
+      "chk_subscriptions_status",
+      sql`${table.status} IN ('inactive', 'active')`,
+    ),
+    check("chk_subscriptions_plan_code", sql`${table.planCode} = 'pulse_weekly'`),
+  ],
 );
 
 export const paymentOrders = sqliteTable(
@@ -116,5 +146,21 @@ export const paymentOrders = sqliteTable(
     uniqueIndex("uq_payment_orders_order_no").on(table.orderNo),
     uniqueIndex("uq_payment_orders_checkout_token").on(table.checkoutToken),
     index("idx_payment_orders_session_status").on(table.sessionId, table.status),
+    uniqueIndex("uq_payment_orders_session_pending")
+      .on(table.sessionId)
+      .where(sql`${table.status} = 'pending'`),
+    check(
+      "chk_payment_orders_provider",
+      sql`${table.provider} = 'wechat_mock'`,
+    ),
+    check(
+      "chk_payment_orders_plan_code",
+      sql`${table.planCode} = 'pulse_weekly'`,
+    ),
+    check(
+      "chk_payment_orders_status",
+      sql`${table.status} IN ('pending', 'paid', 'expired')`,
+    ),
+    check("chk_payment_orders_amount", sql`${table.amountFen} > 0`),
   ],
 );

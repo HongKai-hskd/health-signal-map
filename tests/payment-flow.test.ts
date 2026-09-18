@@ -21,6 +21,19 @@ async function completedSession() {
 }
 
 describe("mock QR payment flow", () => {
+  it("reuses one pending order when checkout creation races", async () => {
+    const { store, session } = await completedSession();
+    const payments = new MockPaymentService(store);
+
+    const checkouts = await Promise.all([
+      payments.createCheckout(session.id, new Date("2026-09-18T10:00:00.000Z")),
+      payments.createCheckout(session.id, new Date("2026-09-18T10:00:00.001Z")),
+    ]);
+
+    expect(checkouts[0].id).toBe(checkouts[1].id);
+    expect((await store.getLatestPendingPaymentOrder(session.id))?.id).toBe(checkouts[0].id);
+  });
+
   it("creates a pending checkout and unlocks the report only after an idempotent payer confirmation", async () => {
     const { store, assessments, session } = await completedSession();
     const payments = new MockPaymentService(store);

@@ -31,7 +31,6 @@ export type AssessmentStore = {
   saveResult(sessionId: string, result: HealthAssessment): Promise<void>;
   getResult(sessionId: string): Promise<HealthAssessment | null>;
   getSubscriptionStatus(sessionId: string): Promise<SubscriptionStatus>;
-  activateSubscription(sessionId: string): Promise<void>;
 };
 
 export class AssessmentError extends Error {
@@ -93,12 +92,6 @@ export class AssessmentService {
     return redactHealthAssessment(sessionId, result, subscriptionStatus);
   }
 
-  async pay(sessionId: string) {
-    const result = await this.store.getResult(sessionId);
-    if (!result) throw new AssessmentError("请先完成测评，再解锁完整地图。", 409);
-    await this.store.activateSubscription(sessionId);
-    return this.getResults(sessionId);
-  }
 }
 
 export class InMemoryAssessmentStore implements AssessmentStore, PaymentOrderStore {
@@ -162,12 +155,11 @@ export class InMemoryAssessmentStore implements AssessmentStore, PaymentOrderSto
     return this.subscriptions.get(sessionId) ?? "inactive";
   }
 
-  async activateSubscription(sessionId: string) {
-    if (!this.sessions.has(sessionId)) throw new AssessmentError("找不到测评会话。", 404);
-    this.subscriptions.set(sessionId, "active");
-  }
-
   async createPaymentOrder(order: PaymentOrder) {
+    const existing = [...this.paymentOrders.values()].find(
+      (entry) => entry.sessionId === order.sessionId && entry.status === "pending",
+    );
+    if (existing) return { ...existing };
     this.paymentOrders.set(order.id, { ...order });
     return { ...order };
   }
@@ -203,6 +195,11 @@ export class InMemoryAssessmentStore implements AssessmentStore, PaymentOrderSto
     const order = this.paymentOrders.get(orderId);
     if (!order) return null;
     if (order.status === "pending") {
+      if (Date.parse(order.expiresAt) <= Date.parse(paidAt)) {
+        order.status = "expired";
+        order.updatedAt = paidAt;
+        return { ...order };
+      }
       order.status = "paid";
       order.paidAt = paidAt;
       order.updatedAt = paidAt;
