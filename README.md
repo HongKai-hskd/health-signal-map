@@ -13,6 +13,7 @@
 ## 交付物导航
 
 - [交付物完成度清单](./docs/DELIVERY-CHECKLIST.md)
+- [API 完整参考](./docs/API.md)
 - [自动化测试与 CI](./docs/TESTING.md)
 - [数据库 Schema 与 Mermaid ER 图](./docs/DATABASE-SCHEMA.md)
 - [AI 使用复盘](./docs/AI-RETROSPECTIVE.md)
@@ -63,7 +64,7 @@ npm run db:local:seed
 
 ## API
 
-所有写接口都通过 `pulse_session` HttpOnly Cookie 绑定当前测评会话。
+除“创建新测评”的 `POST /api/assessment/reset` 外，所有写接口和结果接口都通过 `pulse_session` HttpOnly Cookie 绑定当前测评会话。完整请求、响应和错误契约见 [API 完整参考](./docs/API.md)。
 
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
@@ -75,7 +76,7 @@ npm run db:local:seed
 | GET | `/api/results/export` | 下载当前会话可见范围内的 Markdown 报告 |
 | POST | `/api/pay` | 校验 `plan=pulse_weekly`，模拟幂等支付回调并将订阅状态改为 active |
 
-接口约束：没有 `pulse_session` Cookie 的写入/结果请求返回 `401`；非法步骤返回 `400`；非法 JSON 返回 `400`；Zod 数据校验失败返回 `422`；已完成 session 不允许继续修改，返回 `409`，需要通过 reset 开始新测评。
+接口约束：除 reset 外，没有 `pulse_session` Cookie 的写入/结果请求返回 `401`；非法步骤返回 `400`；非法 JSON 返回 `400`；PATCH 顶层或步骤数据包含未声明字段时返回 `422`；Zod 数据校验失败返回 `422`；已完成 session 不允许继续修改，返回 `409`，需要通过 reset 开始新测评。
 
 ### 可重放的 `/pay` 流程
 
@@ -144,12 +145,16 @@ erDiagram
   health_results {
     integer id PK
     text session_id FK
+    integer bmi
     text bmi_exact
+    text bmi_category
     integer calorie_target
     text target_date
     integer score
+    text insight
     text curve_json
     text input_json
+    text created_at
   }
   subscriptions {
     integer id PK
@@ -157,6 +162,7 @@ erDiagram
     text status
     text plan_code
     text paid_at
+    text updated_at
   }
 ```
 

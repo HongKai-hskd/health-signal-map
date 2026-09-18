@@ -134,6 +134,9 @@ export class InMemoryAssessmentStore implements AssessmentStore {
   async saveStep(sessionId: string, step: StepKey, data: AssessmentData) {
     const entry = this.sessions.get(sessionId);
     if (!entry) throw new AssessmentError("找不到测评会话。", 404);
+    if (entry.session.status === "completed") {
+      throw new AssessmentError("这份测评已经完成，请重新开始新的测评。", 409);
+    }
     entry.steps.set(step, data);
     entry.session.currentStep = Math.max(entry.session.currentStep, STEP_KEYS.indexOf(step) + 1);
     entry.session.updatedAt = new Date().toISOString();

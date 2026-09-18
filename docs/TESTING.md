@@ -35,12 +35,14 @@ npm run test:d1
 | --- | --- | --- |
 | 没有 Cookie 访问结果或支付 | `401` | `tests/api-routes.test.ts` |
 | 非法 JSON | `400`，返回中文错误 | `tests/api-routes.test.ts` |
+| PATCH 顶层未知字段 | `422`，拒绝未声明输入 | `tests/api-routes.test.ts` |
 | 未知步骤 | `400` | `tests/api-routes.test.ts` |
 | 年龄、身高、体重越界 | `422` | 两个测试文件 |
 | 未知字段或数组 data | `422` | `tests/api-routes.test.ts` |
 | 目标体重不合理 | 校验失败 | `tests/health-assessment.test.ts` |
 | 不同步骤并发保存 | 所有步骤保留 | `tests/health-assessment.test.ts` |
 | 完成后继续修改 | `409` | `tests/api-routes.test.ts`、D1 smoke |
+| Store 层绕过 Service 写入已完成 session | `409` | `tests/health-assessment.test.ts` |
 | preview 读取趋势 | 不返回 `details/curve` | 两个测试文件 |
 | 支付后读取结果 | 返回完整 `details` | `tests/api-routes.test.ts`、D1 smoke |
 | 重复支付 | 保持 active，不重复创建订阅 | `tests/api-routes.test.ts` |

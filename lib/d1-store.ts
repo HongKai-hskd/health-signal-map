@@ -85,11 +85,14 @@ export class D1AssessmentStore implements AssessmentStore {
     const now = new Date().toISOString();
     const stepIndex = ["identity", "goal", "activity", "body", "target"].indexOf(step) + 1;
     const [session] = await this.db
-      .select({ id: assessmentSessions.id })
+      .select({ id: assessmentSessions.id, status: assessmentSessions.status })
       .from(assessmentSessions)
       .where(eq(assessmentSessions.id, sessionId))
       .limit(1);
     if (!session) throw new AssessmentError("找不到测评会话。", 404);
+    if (session.status === "completed") {
+      throw new AssessmentError("这份测评已经完成，请重新开始新的测评。", 409);
+    }
 
     await this.db.batch([
       this.db

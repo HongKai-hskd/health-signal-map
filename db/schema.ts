@@ -21,7 +21,9 @@ export const assessmentSessions = sqliteTable(
   "assessment_sessions",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
     status: text("status", { enum: ["in_progress", "completed"] })
       .notNull()
       .default("in_progress"),
@@ -36,7 +38,9 @@ export const assessmentSteps = sqliteTable(
   "assessment_steps",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
-    sessionId: text("session_id").notNull(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => assessmentSessions.id),
     stepKey: text("step_key").notNull(),
     payloadJson: text("payload_json").notNull(),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -54,7 +58,9 @@ export const healthResults = sqliteTable(
   "health_results",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
-    sessionId: text("session_id").notNull(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => assessmentSessions.id),
     bmi: integer("bmi").notNull(),
     bmiExact: text("bmi_exact").notNull(),
     bmiCategory: text("bmi_category").notNull(),
@@ -73,7 +79,9 @@ export const subscriptions = sqliteTable(
   "subscriptions",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
-    sessionId: text("session_id").notNull(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => assessmentSessions.id),
     status: text("status", { enum: ["inactive", "active"] })
       .notNull()
       .default("inactive"),

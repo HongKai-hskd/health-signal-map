@@ -63,6 +63,20 @@ erDiagram
 | `health_results` | 保存服务端计算结果和输入快照 | 每个 session 最多一条结果 |
 | `subscriptions` | 保存模拟订阅状态和方案 | 每个 session 最多一条订阅 |
 
+## 字段与约束分层
+
+数据库约束和应用校验分成两层：
+
+| 层级 | 负责内容 | 证据 |
+| --- | --- | --- |
+| 数据库 | 主键、外键、非空、唯一索引、查询索引 | `db/schema.ts`、`drizzle/0000_pulse_initial.sql` |
+| API / Domain | step 字段形状、枚举、数值上下界、目标体重关系、结果访问权限 | `lib/domain.ts`、`app/api/*/route.ts` |
+| Service | session 生命周期、完成态写保护、结果幂等、订阅状态读取 | `lib/assessment-service.ts` |
+
+`assessment_steps.payload_json` 和 `health_results.input_json/curve_json` 是 JSON 文本列，JSON 内部字段由 Zod 在写入前校验；数据库本身不负责解析这些业务 JSON。
+
+当前匿名模式以 `pulse_session` 作为访问边界。创建或 reset 一次测评会创建一个新的 `users` 行和 `assessment_sessions` 行，旧 session 保留用于历史结果，但不会被新 Cookie 复用；这符合挑战要求的简易 Session 识别，不等同于正式账号体系。
+
 ## 关键设计判断
 
 1. 分步数据不直接覆盖 session 的整块 JSON，而是按步骤单独 upsert。这样不同步骤并发保存时不会发生整块数据的丢失。
@@ -71,6 +85,8 @@ erDiagram
 4. `subscriptions` 与结果表分离，结果接口根据订阅状态决定返回 preview 还是 full，不把权限判断交给前端。
 5. `bmi` 保留整数展示字段，同时使用 `bmi_exact` 保留一位小数，兼顾查询和展示。
 
+6. `health_results` 持久化计算所需的输入快照和核心结果；行动计划、阶段路线和状态调整规则由同一输入在读取时生成，因此生产化时应增加算法版本字段，保证历史报告可复现。
+
 ## 源码与验证路径
 
 - Drizzle schema：`db/schema.ts`
@@ -78,6 +94,7 @@ erDiagram
 - D1 存储实现：`lib/d1-store.ts`
 - 本地 D1 流程：`scripts/test-d1-http.mjs`
 - Schema 图和字段说明：本文档
+- API 字段和错误契约：`docs/API.md`
 
 ## 证据链
 

@@ -119,6 +119,13 @@ describe("assessment API routes", () => {
     const nullPayload = await assessmentPatch(request("/api/assessment", { method: "PATCH", cookie, body: "null" }));
     expect(nullPayload.status).toBe(400);
 
+    const unknownPayloadField = await assessmentPatch(request("/api/assessment", {
+      method: "PATCH",
+      cookie,
+      body: { step: "body", data: { age: 32, heightCm: 168, weightKg: 76 }, debug: true },
+    }));
+    expect(unknownPayloadField.status).toBe(422);
+
     const unknownStep = await saveStep(cookie, "unknown", {});
     expect(unknownStep.status).toBe(400);
 

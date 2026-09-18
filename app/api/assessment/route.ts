@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
   appendSessionCookie,
   assessmentService,
@@ -5,6 +6,13 @@ import {
   readJson,
   readSessionId,
 } from "../../../lib/route-utils";
+
+const assessmentPatchSchema = z
+  .object({
+    step: z.string().min(1),
+    data: z.record(z.unknown()),
+  })
+  .strict();
 
 export async function GET(request: Request) {
   try {
@@ -29,13 +37,10 @@ export async function PATCH(request: Request) {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
       return Response.json({ error: "step 和 data 都是必填项。" }, { status: 400 });
     }
-    const input = payload as {
-      step?: string;
-      data?: Record<string, unknown>;
-    };
-    if (!input.step || !input.data || typeof input.data !== "object") {
+    if (!("step" in payload) || !("data" in payload) || !payload.step || !payload.data) {
       return Response.json({ error: "step 和 data 都是必填项。" }, { status: 400 });
     }
+    const input = assessmentPatchSchema.parse(payload);
     const session = await assessmentService().saveStep(sessionId, input.step, input.data);
     return Response.json({ session }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

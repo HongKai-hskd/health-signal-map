@@ -143,7 +143,7 @@ describe("assessment persistence and access", () => {
   });
 
   it("keeps a completed result idempotent and rejects stale writes", async () => {
-    const { service, session } = await setup();
+    const { store, service, session } = await setup();
     await service.saveStep(session.id, "identity", { gender: validInput.gender });
     await service.saveStep(session.id, "goal", { goal: validInput.goal });
     await service.saveStep(session.id, "activity", { activityLevel: validInput.activityLevel, exerciseDays: validInput.exerciseDays });
@@ -155,6 +155,7 @@ describe("assessment persistence and access", () => {
 
     expect(second).toEqual(first);
     await expect(service.saveStep(session.id, "body", { age: 33, heightCm: 168, weightKg: 75 })).rejects.toMatchObject({ status: 409 });
+    await expect(store.saveStep(session.id, "body", { age: 33, heightCm: 168, weightKg: 75 })).rejects.toMatchObject({ status: 409 });
   });
 
   it("starts a fresh session instead of reusing a completed assessment", async () => {

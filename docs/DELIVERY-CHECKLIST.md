@@ -25,6 +25,7 @@
 代码和启动说明已经在当前仓库内完成，包含：
 
 - `README.md`：启动、API、cURL、数据模型、测试入口和完成度摘要
+- `docs/API.md`：各接口的请求体、响应结构、状态码和权限边界
 - `docs/TESTING.md`：自动化测试与 CI 说明
 - `docs/DATABASE-SCHEMA.md`：数据库关系图和字段解释
 - `docs/AI-RETROSPECTIVE.md`：AI 协作复盘与否决方案
